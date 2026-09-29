@@ -1,0 +1,126 @@
+<Window x:Class="TermDeck.Views.ToolEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tool settings" Width="640" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="{DynamicResource ChromeBg}">
+    <Window.Resources>
+        <!-- Kind tiles, like the session-type icon row in MobaXterm -->
+        <Style x:Key="KindTile" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="Width" Value="120" />
+            <Setter Property="Height" Value="76" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource ChromeBorder}" BorderThickness="1" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBg}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SelectedBg}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                                <Setter TargetName="Bd" Property="BorderThickness" Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="Padding" Value="3" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+    </Window.Resources>
+
+    <StackPanel Margin="14">
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <RadioButton x:Name="KindWindows" Style="{StaticResource KindTile}" GroupName="kind" Checked="Kind_Changed">
+                <StackPanel>
+                    <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE756;" FontSize="26" Foreground="{DynamicResource WinBadge}" HorizontalAlignment="Center" />
+                    <TextBlock Text="Windows program" Margin="0,6,0,0" HorizontalAlignment="Center" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton x:Name="KindWsl" Style="{StaticResource KindTile}" GroupName="kind" Checked="Kind_Changed">
+                <StackPanel>
+                    <TextBlock Text="🐧" FontFamily="Segoe UI Emoji" FontSize="24" Foreground="{DynamicResource WslBadge}" HorizontalAlignment="Center" />
+                    <TextBlock Text="WSL" Margin="0,5,0,0" HorizontalAlignment="Center" />
+                </StackPanel>
+            </RadioButton>
+        </StackPanel>
+
+        <GroupBox Header="Basic settings" Padding="10" Background="{DynamicResource PanelBg}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Text="Display name" VerticalAlignment="Center" />
+                <TextBox x:Name="NameBox" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,10" TextChanged="Any_Changed" />
+
+                <TextBlock Grid.Row="1" Text="Collection" VerticalAlignment="Center" Margin="0,0,0,10" />
+                <ComboBox x:Name="CollectionBox" Grid.Row="1" Grid.Column="1" DisplayMemberPath="Name" Margin="0,0,0,10" />
+                <Button Grid.Row="1" Grid.Column="2" Content="New..." Padding="10,3" Margin="6,0,0,10" Click="NewCollection_Click"
+                        ToolTip="Create a new collection" />
+
+                <!-- Windows -->
+                <TextBlock x:Name="WinPathLabel" Grid.Row="2" Text="Executable" VerticalAlignment="Top" Margin="0,5,0,0" />
+                <StackPanel x:Name="WinPathPanel" Grid.Row="2" Grid.Column="1" Margin="0,0,0,10">
+                    <TextBox x:Name="WinPathBox" FontFamily="{StaticResource MonoFont}" TextChanged="Any_Changed" />
+                    <TextBlock Style="{StaticResource Hint}" Text="Absolute path, a path relative to TermDeck.exe (.\tools\nmap\nmap.exe — handy for the portable build), or a name on PATH (cmd.exe)." />
+                </StackPanel>
+                <Button x:Name="WinBrowse" Grid.Row="2" Grid.Column="2" Content="Browse..." Padding="10,3" Margin="6,0,0,0" VerticalAlignment="Top" Click="BrowseExe_Click" />
+
+                <!-- WSL -->
+                <TextBlock x:Name="DistroLabel" Grid.Row="3" Text="Distro" VerticalAlignment="Center" Margin="0,0,0,10" />
+                <ComboBox x:Name="DistroBox" Grid.Row="3" Grid.Column="1" IsEditable="True" Margin="0,0,0,10" />
+                <TextBlock x:Name="WslCmdLabel" Grid.Row="4" Text="Command / binary" VerticalAlignment="Top" Margin="0,5,0,0" />
+                <StackPanel x:Name="WslCmdPanel" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,10">
+                    <DockPanel>
+                        <ComboBox x:Name="ShellBox" DockPanel.Dock="Right" Width="90" IsEditable="True" Margin="6,0,0,0" ToolTip="Shell used to run the command">
+                            <ComboBoxItem Content="bash" />
+                            <ComboBoxItem Content="zsh" />
+                            <ComboBoxItem Content="sh" />
+                        </ComboBox>
+                        <TextBox x:Name="WslCmdBox" FontFamily="{StaticResource MonoFont}" TextChanged="Any_Changed" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}" Text="e.g. nmap · /usr/bin/ffuf · ~/go/bin/nuclei. Runs through the shell, so pipes, globs and environment variables work." />
+                </StackPanel>
+
+                <TextBlock Grid.Row="5" Text="Default arguments" VerticalAlignment="Center" Margin="0,0,0,10" />
+                <TextBox x:Name="ArgsBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="{StaticResource MonoFont}" Margin="0,0,0,10" TextChanged="Any_Changed" />
+
+            </Grid>
+        </GroupBox>
+
+        <TextBlock Text="Command preview:" Margin="0,12,0,3" Foreground="{DynamicResource TextSecondary}" />
+        <Border Background="#1F1F1F" CornerRadius="3" Padding="8,6">
+            <TextBlock x:Name="PreviewText" Foreground="#D4D4D4" FontFamily="{StaticResource MonoFont}" FontSize="12" TextWrapping="Wrap" />
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <Button Content="OK" Width="90" IsDefault="True" Margin="0,0,6,0" Click="Ok_Click" />
+            <Button Content="Cancel" Width="90" IsCancel="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

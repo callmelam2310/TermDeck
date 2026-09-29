@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>TermDeck</AssemblyName>
+    <RootNamespace>TermDeck</RootNamespace>
+    <Version>0.2.0</Version>
+    <Product>TermDeck</Product>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationIcon>Assets\TermDeck.ico</ApplicationIcon>
+    <!-- Application.ThemeMode (Fluent light/dark) is flagged experimental -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+  </PropertyGroup>
+
+  <!-- Portable: a single self-contained exe -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\TermDeck.ico" />
+    <Resource Include="Assets\logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\xterm.js" LogicalName="xterm.js" />
+    <EmbeddedResource Include="Assets\xterm.css" LogicalName="xterm.css" />
+    <EmbeddedResource Include="Assets\addon-fit.js" LogicalName="addon-fit.js" />
+    <EmbeddedResource Include="Assets\addon-search.js" LogicalName="addon-search.js" />
+    <EmbeddedResource Include="Assets\terminal.html" LogicalName="terminal.html" />
+  </ItemGroup>
+
+</Project>

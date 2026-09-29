@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+{{CSS}}
+html, body { margin: 0; height: 100%; background: #0c0c0c; overflow: hidden; }
+#t { position: absolute; top: 4px; left: 6px; right: 0; bottom: 2px; }
+.xterm-viewport::-webkit-scrollbar { width: 10px; }
+.xterm-viewport::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 5px; }
+.xterm-viewport::-webkit-scrollbar-track { background: #0c0c0c; }
+/* Find bar (Ctrl+F) */
+#find { position: absolute; top: 6px; right: 18px; z-index: 10; display: none; align-items: center; gap: 2px;
+        background: #252526; border: 1px solid #454545; border-radius: 4px; padding: 3px 4px;
+        box-shadow: 0 2px 8px rgba(0,0,0,.5); font: 12px 'Segoe UI', sans-serif; color: #ccc; }
+#find.open { display: flex; }
+#find input { width: 220px; background: #3c3c3c; color: #eee; border: 1px solid #3c3c3c; border-radius: 2px;
+              padding: 3px 6px; outline: none; font: 13px 'Segoe UI', sans-serif; }
+#find input:focus { border-color: #0e639c; }
+#find input.nomatch { border-color: #be1100; }
+#find .count { min-width: 70px; text-align: center; color: #aaa; }
+#find button { background: transparent; color: #ccc; border: 1px solid transparent; border-radius: 3px;
+               min-width: 24px; height: 22px; cursor: pointer; font: 12px 'Segoe UI', sans-serif; }
+#find button:hover { background: #3a3d41; }
+#find button.on { background: #0e639c55; border-color: #0e639c; color: #fff; }
+</style>
+</head>
+<body>
+<div id="t"></div>
+<div id="find">
+  <input id="q" placeholder="Find" spellcheck="false">
+  <span class="count" id="count"></span>
+  <button id="case" title="Match case (Alt+C)">Aa</button>
+  <button id="word" title="Match whole word (Alt+W)"><u>ab</u></button>
+  <button id="regex" title="Use regular expression (Alt+R)">.*</button>
+  <button id="prev" title="Previous match (Shift+Enter)">&#8593;</button>
+  <button id="next" title="Next match (Enter)">&#8595;</button>
+  <button id="close" title="Close (Esc)">&#10005;</button>
+</div>
+<script>{{XTERM}}</script>
+<script>{{FIT}}</script>
+<script>{{SEARCH}}</script>
+<script>
+const post = m => window.chrome.webview.postMessage(m);
+const term = new Terminal({
+  fontFamily: {{FONT}},
+  fontSize: {{SIZE}},
+  scrollback: 100000,
+  allowProposedApi: true,
+  cursorBlink: true,
+  convertEol: false,
+  theme: {
+    background: '#0c0c0c', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: '#264f78',
+    black: '#0c0c0c', red: '#c50f1f', green: '#13a10e', yellow: '#c19c00',
+    blue: '#0037da', magenta: '#881798', cyan: '#3a96dd', white: '#cccccc',
+    brightBlack: '#767676', brightRed: '#e74856', brightGreen: '#16c60c', brightYellow: '#f9f1a5',
+    brightBlue: '#3b78ff', brightMagenta: '#b4009e', brightCyan: '#61d6d6', brightWhite: '#f2f2f2'
+  }
+});
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open(document.getElementById('t'));
+const doFit = () => { try { fit.fit(); } catch (e) { } };
+new ResizeObserver(doFit).observe(document.body);
+doFit();
+
+// ── Find (Ctrl+F) ──
+const search = new SearchAddon.SearchAddon();
+term.loadAddon(search);
+const $ = id => document.getElementById(id);
+const findBar = $('find'), q = $('q'), count = $('count');
+const opts = { caseSensitive: false, wholeWord: false, regex: false };
+const decorations = {
+  matchBackground: '#623315', matchBorder: '#623315', matchOverviewRuler: '#d18616',
+  activeMatchBackground: '#a8ac94', activeMatchBorder: '#e2e24a', activeMatchColorOverviewRuler: '#e2e24a'
+};
+const searchOptions = incremental => ({ ...opts, incremental, decorations });
+function runFind(backwards, incremental) {
+  if (!q.value) { search.clearDecorations(); count.textContent = ''; q.classList.remove('nomatch'); return; }
+  let found;
+  try { found = backwards ? search.findPrevious(q.value, searchOptions(false)) : search.findNext(q.value, searchOptions(incremental)); }
+  catch (e) { found = false; }
+  q.classList.toggle('nomatch', !found);
+  if (!found) count.textContent = 'No results';
+}
+search.onDidChangeResults(r => {
+  if (!q.value) { count.textContent = ''; return; }
+  count.textContent = r.resultCount === 0 ? 'No results'
+    : r.resultIndex >= 0 ? `${r.resultIndex + 1} of ${r.resultCount}` : `${r.resultCount}+ results`;
+});
+function openFind() {
+  findBar.classList.add('open');
+  const sel = term.getSelection();
+  if (sel && !sel.includes('\n')) q.value = sel;
+  q.focus(); q.select();
+  if (q.value) runFind(false, true);
+}
+function closeFind() {
+  findBar.classList.remove('open');
+  search.clearDecorations();
+  term.clearSelection();
+  term.focus();
+}
+function toggle(btn, key) { opts[key] = !opts[key]; btn.classList.toggle('on', opts[key]); runFind(false, true); q.focus(); }
+q.addEventListener('input', () => runFind(false, true));
+q.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); runFind(e.shiftKey, false); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+  else if (e.altKey && e.code === 'KeyC') { e.preventDefault(); toggle($('case'), 'caseSensitive'); }
+  else if (e.altKey && e.code === 'KeyW') { e.preventDefault(); toggle($('word'), 'wholeWord'); }
+  else if (e.altKey && e.code === 'KeyR') { e.preventDefault(); toggle($('regex'), 'regex'); }
+  else if (e.ctrlKey && e.code === 'KeyF') { e.preventDefault(); q.select(); }
+});
+$('case').onclick = () => toggle($('case'), 'caseSensitive');
+$('word').onclick = () => toggle($('word'), 'wholeWord');
+$('regex').onclick = () => toggle($('regex'), 'regex');
+$('prev').onclick = () => { runFind(true, false); q.focus(); };
+$('next').onclick = () => { runFind(false, false); q.focus(); };
+$('close').onclick = closeFind;
+
+term.onResize(s => post({ t: 'resize', cols: s.cols, rows: s.rows }));
+term.onData(d => post({ t: 'input', d }));
+
+// Like MobaXterm: selecting text copies it, right-click pastes. Ctrl+Shift+C/V work too.
+term.onSelectionChange(() => { if (term.hasSelection()) post({ t: 'select', d: term.getSelection() }); });
+term.attachCustomKeyEventHandler(e => {
+  if (e.type !== 'keydown') return true;
+  if (e.ctrlKey && !e.shiftKey && e.code === 'KeyF') { openFind(); return false; }
+  if (e.key === 'Escape' && findBar.classList.contains('open')) { closeFind(); return false; }
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') { post({ t: 'copy', d: term.getSelection() }); return false; }
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyV') { post({ t: 'paste' }); return false; }
+  if (e.ctrlKey && !e.shiftKey && e.code === 'KeyC' && term.hasSelection()) {
+    post({ t: 'copy', d: term.getSelection() }); term.clearSelection(); return false;
+  }
+  if (e.ctrlKey && !e.shiftKey && e.code === 'KeyV') { post({ t: 'paste' }); return false; }
+  return true;
+});
+document.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (!findBar.contains(e.target)) post({ t: 'paste' });
+});
+
+window.chrome.webview.addEventListener('message', e => {
+  const m = e.data;
+  switch (m.t) {
+    case 'w': term.write(m.d); break;
+    case 'reset': term.reset(); search.clearDecorations(); count.textContent = ''; break;
+    case 'find': openFind(); break;
+    case 'focus': term.focus(); break;
+    case 'font': term.options.fontFamily = m.family; term.options.fontSize = m.size; doFit(); break;
+  }
+});
+post({ t: 'ready', cols: term.cols, rows: term.rows });
+</script>
+</body>
+</html>
