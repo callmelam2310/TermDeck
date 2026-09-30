@@ -17,6 +17,14 @@ public sealed class ToolDef
     /// <summary>WSL distro; empty = default distro.</summary>
     public string Distro { get; set; } = "";
 
+    /// <summary>
+    /// Account the tool runs as.
+    /// WSL: Linux user for <c>wsl -u</c> (empty = the distro's login user; e.g. "root").
+    /// Windows: account for CreateProcessWithLogonW as <c>DOMAIN\user</c>, <c>user</c> or <c>user@domain</c>
+    /// (empty = the current user; the password is asked for at run time and never stored).
+    /// </summary>
+    public string RunAsUser { get; set; } = "";
+
     /// <summary>Shell used to run WSL commands (bash/zsh/sh).</summary>
     public string WslShell { get; set; } = "bash";
 
@@ -32,6 +40,14 @@ public sealed class ToolDef
     public string KindLabel => Kind == ToolKind.Wsl
         ? (string.IsNullOrEmpty(Distro) ? "WSL" : $"WSL · {Distro}")
         : "Windows";
+
+    /// <summary>Short label for the run-as account, or empty when running as the current/login user.</summary>
+    public static string RunAsLabel(ToolKind kind, string? user)
+    {
+        user = user?.Trim() ?? "";
+        if (user.Length == 0) return "";
+        return user;
+    }
 }
 
 /// <summary>A named group of tools (like session folders in MobaXterm).</summary>

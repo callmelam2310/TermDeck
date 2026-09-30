@@ -37,6 +37,11 @@ public partial class ToolTab : UserControl, IDisposable
     int _historyIndex = -1;
     bool _suppressSelection;
 
+    /// <summary>Effective run-as account for the next Run; starts from the tool default, can be overridden per run.</summary>
+    string _runAs = "";
+    /// <summary>Run-as account each launched run used, so the info bar can show it (session-only).</summary>
+    readonly Dictionary<long, string> _runAsById = new();
+
     public ToolDef Tool { get; private set; }
     public string Cwd { get; private set; }
 
@@ -66,6 +71,7 @@ public partial class ToolTab : UserControl, IDisposable
         _tickTimer.Start();
 
         ArgsBox.Text = tool.DefaultArgs;
+        _runAs = tool.RunAsUser?.Trim() ?? "";
         ApplyToolUi();
         LoadRuns();
         if (_runs.Count > 0) RunsList.SelectedIndex = 0;
@@ -87,11 +93,24 @@ public partial class ToolTab : UserControl, IDisposable
         ToolPathText.ToolTip = Tool.Kind == ToolKind.Windows ? AppPaths.ResolveToolPath(Tool.Path) : Tool.Path;
         HistoryHeader.Text = $"History · {Tool.Name}";
         CwdText.Text = PathMapper.Display(Cwd, Tool);
+        UpdateRunAsUi();
+    }
+
+    void UpdateRunAsUi()
+    {
+        RunAsLabel.Text = _runAs.Length == 0
+            ? (Tool.Kind == ToolKind.Wsl ? "login user" : "me")
+            : _runAs;
+        var scope = Tool.Kind == ToolKind.Wsl ? "wsl -u" : "logon";
+        RunAsButton.ToolTip = _runAs.Length == 0
+            ? "Runs as the current account. Click to run as another user."
+            : $"Runs as {_runAs} ({scope}). Click to change.";
     }
 
     public void UpdateTool(ToolDef tool)
     {
         Tool = tool;
+        _runAs = tool.RunAsUser?.Trim() ?? "";
         ApplyToolUi();
     }
 
@@ -193,8 +212,10 @@ public partial class ToolTab : UserControl, IDisposable
             return;
         }
         var r = item.Record;
-        RunInfo.Text = "$ " + r.CommandLine;
-        RunInfo.ToolTip = $"{r.CommandLine}\nDirectory: {r.Cwd}";
+        var asUser = _runAsById.TryGetValue(r.Id, out var u) ? $"[{u}] " : "";
+        RunInfo.Text = "$ " + asUser + r.CommandLine;
+        RunInfo.ToolTip = $"{r.CommandLine}\nDirectory: {r.Cwd}"
+            + (asUser.Length > 0 ? $"\nRun as: {u}" : "");
         if (item.IsRunning)
             RunStatus.Text = $"running · {RunSession.FormatDuration(DateTime.Now - r.StartedAt)}";
         else
@@ -214,7 +235,16 @@ public partial class ToolTab : UserControl, IDisposable
         }
 
         var args = ArgsBox.Text.Trim();
-        var spec = CommandBuilder.Build(Tool, args, Cwd);
+        var spec = CommandBuilder.Build(Tool, args, Cwd, _runAs);
+
+        // Windows run-as needs a password (WSL run-as is baked into the wsl -u command line and needs none).
+        WinCredential? cred = null;
+        if (spec.WinRunAsUser != null)
+        {
+            cred = CredentialWindow.Acquire(Window.GetWindow(this), spec.WinRunAsUser);
+            if (cred == null) return; // user cancelled the password prompt
+        }
+
         var record = new RunRecord
         {
             ToolId = Tool.Id,
@@ -230,6 +260,8 @@ public partial class ToolTab : UserControl, IDisposable
             MessageBox.Show("Could not write history: " + ex.Message, "TermDeck", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
+
+        if (_runAs.Length > 0) _runAsById[record.Id] = _runAs;
 
         var session = new RunSession(record);
         _live[record.Id] = session;
@@ -257,7 +289,7 @@ public partial class ToolTab : UserControl, IDisposable
         RunsList.ScrollIntoView(item);
         _suppressSelection = false;
 
-        session.Start(spec, _store.LogPath(record), Term.Cols, Term.Rows);
+        session.Start(spec, _store.LogPath(record), Term.Cols, Term.Rows, cred);
         RunningChanged?.Invoke(this);
         UpdateInfo();
         UpdateButtons();
@@ -326,6 +358,17 @@ public partial class ToolTab : UserControl, IDisposable
     // ───────────────────────── UI events ─────────────────────────
 
     void Run_Click(object sender, RoutedEventArgs e) => Run();
+
+    void RunAs_Click(object sender, RoutedEventArgs e)
+    {
+        var label = Tool.Kind == ToolKind.Wsl
+            ? "Linux user (empty = login user; e.g. root):"
+            : "Windows account (empty = current user; DOMAIN\\user or user):";
+        var result = PromptWindow.Ask(Window.GetWindow(this), "Run as", label, _runAs);
+        if (result == null) return; // cancelled
+        _runAs = result.Trim();
+        UpdateRunAsUi();
+    }
 
     void Stop_Click(object sender, RoutedEventArgs e) => _attached?.Stop();
 

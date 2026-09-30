@@ -32,6 +32,7 @@ public partial class ToolEditorWindow : Window
 
         NameBox.Text = _tool.Name;
         ArgsBox.Text = _tool.DefaultArgs;
+        RunAsBox.Text = _tool.RunAsUser;
         ShellBox.Text = string.IsNullOrWhiteSpace(_tool.WslShell) ? "bash" : _tool.WslShell;
         DistroBox.Text = _tool.Distro;
         if (_tool.Kind == ToolKind.Wsl) { WslCmdBox.Text = _tool.Path; KindWsl.IsChecked = true; }
@@ -40,6 +41,7 @@ public partial class ToolEditorWindow : Window
 
         DistroBox.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent, new TextChangedEventHandler(Any_Changed));
         ShellBox.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent, new TextChangedEventHandler(Any_Changed));
+        RunAsBox.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent, new TextChangedEventHandler(Any_Changed));
 
         Loaded += async (_, _) =>
         {
@@ -88,6 +90,21 @@ public partial class ToolEditorWindow : Window
         var wsl = IsWsl ? Visibility.Visible : Visibility.Collapsed;
         WinPathLabel.Visibility = WinPathPanel.Visibility = WinBrowse.Visibility = win;
         DistroLabel.Visibility = DistroBox.Visibility = WslCmdLabel.Visibility = WslCmdPanel.Visibility = wsl;
+
+        // "Run as" presets and hint differ per kind. Preserve whatever the user has typed.
+        var current = RunAsBox.Text;
+        RunAsBox.Items.Clear();
+        if (IsWsl)
+        {
+            RunAsBox.Items.Add(new ComboBoxItem { Content = "" });
+            RunAsBox.Items.Add(new ComboBoxItem { Content = "root" });
+            RunAsHint.Text = "Linux user for `wsl -u`. Empty = the distro's login user. root needs no password.";
+        }
+        else
+        {
+            RunAsHint.Text = "DOMAIN\\user, user, or user@domain. Empty = current user. The password is asked when you run and is never saved.";
+        }
+        RunAsBox.Text = current;
     }
 
     void Any_Changed(object sender, TextChangedEventArgs e)
@@ -103,6 +120,7 @@ public partial class ToolEditorWindow : Window
         t.Path = (IsWsl ? WslCmdBox.Text : WinPathBox.Text).Trim().Trim('"');
         t.Distro = IsWsl ? DistroBox.Text.Trim() : "";
         t.WslShell = string.IsNullOrWhiteSpace(ShellBox.Text) ? "bash" : ShellBox.Text.Trim();
+        t.RunAsUser = RunAsBox.Text.Trim();
         t.DefaultArgs = ArgsBox.Text.Trim();
         t.CollectionId = (CollectionBox.SelectedItem as ToolCollection)?.Id ?? "";
         return t;
@@ -114,7 +132,11 @@ public partial class ToolEditorWindow : Window
         var t = Collect();
         if (string.IsNullOrEmpty(t.Path)) { PreviewText.Text = "(no executable yet)"; return; }
         // Every tool starts in the project folder.
-        PreviewText.Text = CommandBuilder.Build(t, t.DefaultArgs, _projectDir).CommandLine;
+        var spec = CommandBuilder.Build(t, t.DefaultArgs, _projectDir);
+        // Windows run-as does not change the command line (it uses a separate logon); note it so the preview is honest.
+        PreviewText.Text = spec.WinRunAsUser != null
+            ? $"[run as {spec.WinRunAsUser} — password prompted]\n{spec.CommandLine}"
+            : spec.CommandLine;
     }
 
     void BrowseExe_Click(object sender, RoutedEventArgs e)

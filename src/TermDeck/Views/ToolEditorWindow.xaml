@@ -73,6 +73,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TextBlock Text="Display name" VerticalAlignment="Center" />
@@ -109,6 +110,12 @@
 
                 <TextBlock Grid.Row="5" Text="Default arguments" VerticalAlignment="Center" Margin="0,0,0,10" />
                 <TextBox x:Name="ArgsBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" FontFamily="{StaticResource MonoFont}" Margin="0,0,0,10" TextChanged="Any_Changed" />
+
+                <TextBlock Grid.Row="6" Text="Run as" VerticalAlignment="Top" Margin="0,5,0,0" />
+                <StackPanel Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2">
+                    <ComboBox x:Name="RunAsBox" IsEditable="True" FontFamily="{StaticResource MonoFont}" />
+                    <TextBlock x:Name="RunAsHint" Style="{StaticResource Hint}" />
+                </StackPanel>
 
             </Grid>
         </GroupBox>

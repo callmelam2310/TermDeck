@@ -7,6 +7,19 @@ using Microsoft.Win32.SafeHandles;
 
 namespace TermDeck.Core;
 
+/// <summary>Credentials to launch a Windows tool under another account via CreateProcessWithLogonW.</summary>
+public sealed record WinCredential(string Account, string Password)
+{
+    /// <summary>Splits "DOMAIN\user" / "user@domain" / "user" into (user, domain?) for CreateProcessWithLogonW.</summary>
+    public (string User, string? Domain) Split()
+    {
+        var a = Account.Trim();
+        var bs = a.IndexOf('\\');
+        if (bs > 0) return (a[(bs + 1)..], a[..bs]);
+        return (a, null); // local account or UPN (user@domain) — domain stays null
+    }
+}
+
 /// <summary>
 /// A process running inside a Windows Pseudo Console (ConPTY): keeps ANSI colors, progress bars, Ctrl+C and interactive stdin.
 /// The process is assigned to a Job Object so Stop / app exit kills the whole process tree.
@@ -33,7 +46,7 @@ public sealed class PtyProcess : IDisposable
         _output = output;
     }
 
-    public static PtyProcess Start(string commandLine, string? workingDir, int cols, int rows)
+    public static PtyProcess Start(string commandLine, string? workingDir, int cols, int rows, WinCredential? cred = null)
     {
         if (!Native.CreatePipe(out var inRead, out var inWrite, IntPtr.Zero, 0))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "CreatePipe (input)");
@@ -64,9 +77,23 @@ public sealed class PtyProcess : IDisposable
 
             var cmd = (commandLine + "\0").ToCharArray();
             var cwd = string.IsNullOrEmpty(workingDir) || !Directory.Exists(workingDir) ? null : workingDir;
-            if (!Native.CreateProcessW(null, cmd, IntPtr.Zero, IntPtr.Zero, false,
-                    Native.EXTENDED_STARTUPINFO_PRESENT | Native.CREATE_UNICODE_ENVIRONMENT | Native.CREATE_SUSPENDED,
-                    IntPtr.Zero, cwd, ref si, out var pi))
+            const uint flags = Native.EXTENDED_STARTUPINFO_PRESENT | Native.CREATE_UNICODE_ENVIRONMENT | Native.CREATE_SUSPENDED;
+            bool ok;
+            Native.PROCESS_INFORMATION pi;
+            if (cred == null)
+            {
+                ok = Native.CreateProcessW(null, cmd, IntPtr.Zero, IntPtr.Zero, false,
+                    flags, IntPtr.Zero, cwd, ref si, out pi);
+            }
+            else
+            {
+                // The child runs in a new logon session. It reaches the pseudo console through the attribute list
+                // (not handle inheritance), so ConPTY keeps working; the environment is the target user's.
+                var (user, domain) = cred.Split();
+                ok = Native.CreateProcessWithLogonW(user, domain, cred.Password, Native.LOGON_WITH_PROFILE,
+                    null, cmd, flags, IntPtr.Zero, cwd, ref si, out pi);
+            }
+            if (!ok)
             {
                 var err = Marshal.GetLastWin32Error();
                 Native.ClosePseudoConsole(hpc);
@@ -75,7 +102,13 @@ public sealed class PtyProcess : IDisposable
             }
 
             var job = CreateKillOnCloseJob();
-            if (job != IntPtr.Zero) Native.AssignProcessToJobObject(job, pi.hProcess);
+            // Assigning a run-as process (a different logon session) to the job can fail; if so, drop the job
+            // so Kill() terminates the process handle directly instead of an empty job that kills nothing.
+            if (job != IntPtr.Zero && !Native.AssignProcessToJobObject(job, pi.hProcess))
+            {
+                Native.CloseHandle(job);
+                job = IntPtr.Zero;
+            }
             Native.ResumeThread(pi.hThread);
             Native.CloseHandle(pi.hThread);
 
@@ -153,6 +186,7 @@ internal static class Native
     public const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     public const uint CREATE_SUSPENDED = 0x00000004;
+    public const uint LOGON_WITH_PROFILE = 0x00000001;
     public const uint INFINITE = 0xFFFFFFFF;
     public const int STARTF_USESTDHANDLES = 0x00000100;
     public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
@@ -241,6 +275,13 @@ internal static class Native
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern bool CreateProcessW(string? lpApplicationName, char[] lpCommandLine, IntPtr lpProcessAttributes,
         IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment,
+        string? lpCurrentDirectory, ref STARTUPINFOEX lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+
+    // Runs the child in a new logon session for another account. No bInheritHandles parameter: the pseudo
+    // console is passed through the STARTUPINFOEX attribute list, so ConPTY still attaches.
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern bool CreateProcessWithLogonW(string lpUsername, string? lpDomain, string lpPassword,
+        uint dwLogonFlags, string? lpApplicationName, char[] lpCommandLine, uint dwCreationFlags, IntPtr lpEnvironment,
         string? lpCurrentDirectory, ref STARTUPINFOEX lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
 
     [DllImport("kernel32.dll")]

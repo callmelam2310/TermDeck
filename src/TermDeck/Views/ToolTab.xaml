@@ -46,6 +46,13 @@
                     </Border>
                     <TextBlock x:Name="ToolPathText" DockPanel.Dock="Left" FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold"
                                VerticalAlignment="Center" Margin="0,0,6,0" MaxWidth="320" TextTrimming="CharacterEllipsis" />
+                    <Button x:Name="RunAsButton" DockPanel.Dock="Left" Margin="0,0,6,0" Padding="8,4"
+                            Click="RunAs_Click" ToolTip="Choose the account this run uses">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE77B;" FontSize="13" VerticalAlignment="Center" Margin="0,0,4,0" />
+                            <TextBlock x:Name="RunAsLabel" VerticalAlignment="Center" FontSize="12" />
+                        </StackPanel>
+                    </Button>
                     <TextBox x:Name="ArgsBox" FontFamily="{StaticResource MonoFont}" FontSize="13" Padding="4,3" VerticalContentAlignment="Center"
                              AllowDrop="True" PreviewKeyDown="ArgsBox_PreviewKeyDown"
                              PreviewDragOver="ArgsBox_PreviewDragOver" PreviewDrop="ArgsBox_PreviewDrop"

@@ -25,14 +25,14 @@ public sealed class RunSession
 
     public RunSession(RunRecord record) => Record = record;
 
-    public void Start(LaunchSpec spec, string castPath, int cols, int rows)
+    public void Start(LaunchSpec spec, string castPath, int cols, int rows, WinCredential? cred = null)
     {
         _cast = new CastWriter(castPath, cols, rows, spec.Display);
         _clock.Start();
         IsRunning = true;
         try
         {
-            _pty = PtyProcess.Start(spec.CommandLine, spec.WorkingDir, cols, rows);
+            _pty = PtyProcess.Start(spec.CommandLine, spec.WorkingDir, cols, rows, cred);
         }
         catch (Exception ex)
         {
