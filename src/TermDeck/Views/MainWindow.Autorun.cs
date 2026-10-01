@@ -98,6 +98,35 @@ public partial class MainWindow
             StatusAutorun.Foreground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString(color)!;
         else
             StatusAutorun.SetResourceReference(TextBlock.ForegroundProperty, color);
+
+        // Also surface it on the ribbon button (much more visible than the status bar): relabel + blink while running.
+        AutorunRibbonLabel.Text = AutorunBusy ? $"Running {_autoRuns.Count}" : "Autorun";
+        AutorunRibbonButton.ToolTip = AutorunBusy
+            ? $"Autorun is running ({_autoRuns.Count} running, {_autoQueue.Count} queued). Click the status bar to stop."
+            : "Autorun: when a tool finishes, filter its output and run the next tool with it";
+        SetAutorunBlink(AutorunBusy);
+    }
+
+    bool _autorunBlinking;
+
+    void SetAutorunBlink(bool on)
+    {
+        if (on == _autorunBlinking) return;
+        _autorunBlinking = on;
+        if (on)
+        {
+            var blink = new System.Windows.Media.Animation.DoubleAnimation(1.0, 0.25, TimeSpan.FromMilliseconds(600))
+            {
+                AutoReverse = true,
+                RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever,
+            };
+            AutorunRibbonIcon.BeginAnimation(UIElement.OpacityProperty, blink);
+        }
+        else
+        {
+            AutorunRibbonIcon.BeginAnimation(UIElement.OpacityProperty, null);
+            AutorunRibbonIcon.Opacity = 1;
+        }
     }
 
     /// <summary>Project switch: queued runs belong to the old project.</summary>

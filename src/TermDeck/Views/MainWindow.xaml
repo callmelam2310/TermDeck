@@ -162,10 +162,10 @@
                             <TextBlock Style="{StaticResource RibbonLabel}" Text="Edit" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource RibbonButton}" Click="Autorun_Click" ToolTip="Autorun: when a tool finishes, filter its output and run the next tool with it">
+                    <Button x:Name="AutorunRibbonButton" Style="{StaticResource RibbonButton}" Click="Autorun_Click" ToolTip="Autorun: when a tool finishes, filter its output and run the next tool with it">
                         <StackPanel>
-                            <TextBlock Style="{StaticResource RibbonIcon}" Text="&#xE945;" Foreground="#C8930C" />
-                            <TextBlock Style="{StaticResource RibbonLabel}" Text="Autorun" />
+                            <TextBlock x:Name="AutorunRibbonIcon" Style="{StaticResource RibbonIcon}" Text="&#xE945;" Foreground="#C8930C" />
+                            <TextBlock x:Name="AutorunRibbonLabel" Style="{StaticResource RibbonLabel}" Text="Autorun" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource RibbonButton}" Click="Agent_Click" ToolTip="AI agent: chat with Claude to drive TermDeck (run tools, read history, build autorun chains)">
