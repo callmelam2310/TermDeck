@@ -1,11 +1,13 @@
 using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using TermDeck.Core;
+using TermDeck.Core.Ai;
 
 namespace TermDeck.Views;
 
-/// <summary>General settings: appearance (light/dark), terminal font, and where data is stored.</summary>
+/// <summary>General settings: appearance (light/dark), terminal font, AI agent profiles, and where data is stored.</summary>
 public sealed class SettingsWindow : Window
 {
     readonly AppConfig _config;
@@ -13,6 +15,9 @@ public sealed class SettingsWindow : Window
     readonly ComboBox _theme;
     readonly TextBox _font;
     readonly ComboBox _size;
+    AgentProfilesData _agentProfiles = AgentProfiles.Load();
+    readonly ComboBox _agentProfile = new() { Width = 220, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 3, 0, 0) };
+    readonly CheckBox _agentAuto;
 
     public SettingsWindow(AppConfig config)
     {
@@ -50,6 +55,26 @@ public sealed class SettingsWindow : Window
         terminal.Children.Add(new TextBlock { Text = "Font size" });
         terminal.Children.Add(_size);
 
+        // AI agent
+        ReloadAgentProfiles();
+        var manage = new Button { Content = "Manage profiles…", Margin = new Thickness(6, 3, 0, 0), Padding = new Thickness(10, 2, 10, 2) };
+        manage.Click += (_, _) =>
+        {
+            var dlg = new AgentSettingsWindow(_agentProfiles) { Owner = this };
+            dlg.ShowDialog();
+            _agentProfiles = AgentProfiles.Load();
+            ReloadAgentProfiles();
+        };
+        _agentAuto = new CheckBox { Content = "Auto-approve agent actions (run/edit without asking)", IsChecked = config.AgentAutoApprove, Margin = new Thickness(0, 10, 0, 0) };
+        var profileRow = new StackPanel { Orientation = Orientation.Horizontal };
+        profileRow.Children.Add(_agentProfile);
+        profileRow.Children.Add(manage);
+        var agent = new StackPanel();
+        agent.Children.Add(new TextBlock { Text = "Provider / model profile" });
+        agent.Children.Add(profileRow);
+        agent.Children.Add(_agentAuto);
+        agent.Children.Add(Hint("Profiles set the Claude model/provider the AI agent uses. A blank profile uses your logged-in Claude subscription. Switch or edit them here; the agent tab picks it up on the next message."));
+
         var data = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -69,6 +94,7 @@ public sealed class SettingsWindow : Window
         var root = new StackPanel { Margin = new Thickness(14) };
         root.Children.Add(Group("Appearance", appearance, 0));
         root.Children.Add(Group("Terminal", terminal, 10));
+        root.Children.Add(Group("AI agent", agent, 10));
         root.Children.Add(Group("Data", data, 10));
         root.Children.Add(buttons);
         Content = root;
@@ -81,9 +107,19 @@ public sealed class SettingsWindow : Window
 
     AppTheme SelectedTheme => (_theme.SelectedItem as ComboBoxItem)?.Tag is AppTheme t ? t : AppTheme.System;
 
+    void ReloadAgentProfiles()
+    {
+        _agentProfile.Items.Clear();
+        foreach (var p in _agentProfiles.Profiles) _agentProfile.Items.Add(p.Name);
+        var active = AgentProfiles.Active(_agentProfiles).Name;
+        if (_agentProfile.Items.Contains(active)) _agentProfile.SelectedItem = active;
+        else if (_agentProfile.Items.Count > 0) _agentProfile.SelectedIndex = 0;
+    }
+
     static GroupBox Group(string header, UIElement content, double top)
     {
-        var g = new GroupBox { Header = header, Padding = new Thickness(10), Content = content, Margin = new Thickness(0, top, 0, 0) };
+        var title = new TextBlock { Text = header, FontSize = 14, FontWeight = FontWeights.SemiBold };
+        var g = new GroupBox { Header = title, Padding = new Thickness(10), Content = content, Margin = new Thickness(0, top, 0, 0) };
         g.SetResourceReference(BackgroundProperty, "PanelBg");
         return g;
     }
@@ -105,6 +141,12 @@ public sealed class SettingsWindow : Window
         _config.Theme = SelectedTheme;
         _config.TerminalFont = string.IsNullOrWhiteSpace(_font.Text) ? "Consolas, monospace" : _font.Text.Trim();
         _config.TerminalFontSize = size;
+        _config.AgentAutoApprove = _agentAuto.IsChecked == true;
+        if (_agentProfile.SelectedItem is string prof)
+        {
+            _agentProfiles.Active = prof;
+            try { AgentProfiles.Save(_agentProfiles); } catch { }
+        }
         DialogResult = true;
     }
 }

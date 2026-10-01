@@ -83,7 +83,8 @@ public sealed class TerminalHost : Border, IDisposable
             .Replace("{{CSS}}", ReadResource("xterm.css"))
             .Replace("{{XTERM}}", ReadResource("xterm.js"))
             .Replace("{{FIT}}", ReadResource("addon-fit.js"))
-            .Replace("{{SEARCH}}", ReadResource("addon-search.js"));
+            .Replace("{{SEARCH}}", ReadResource("addon-search.js"))
+            .Replace("{{SERIALIZE}}", ReadResource("addon-serialize.js"));
         return _pageTemplate
             .Replace("{{FONT}}", JsonSerializer.Serialize(FontFamily))
             .Replace("{{SIZE}}", FontSize.ToString());
@@ -174,22 +175,25 @@ public sealed class TerminalHost : Border, IDisposable
         Post(new { t = "focus" });
     }
 
-    /// <summary>Plain text of the whole rendered buffer — more accurate than stripping ANSI codes, since ConPTY also emits cursor movement.</summary>
-    public async Task<string> GetBufferTextAsync()
+    /// <summary>Opens the find bar with <paramref name="query"/> and jumps to the first match (after pending output is parsed).</summary>
+    public void Find(string query) => Post(new { t = "find", q = query });
+
+    /// <summary>
+    /// Plain text of the rendered buffer — more accurate than stripping ANSI codes, since ConPTY also emits cursor movement.
+    /// <paramref name="visibleOnly"/> = only the rows currently on screen.
+    /// </summary>
+    public Task<string> GetBufferTextAsync(bool visibleOnly = false) =>
+        EvalStringAsync($"bufferText({(visibleOnly ? "true" : "false")})");
+
+    /// <summary>The buffer with its colors, as ANSI escape sequences (view with <c>cat</c> / <c>less -R</c>).</summary>
+    public Task<string> GetBufferAnsiAsync() => EvalStringAsync("exportAnsi()");
+
+    /// <summary>The buffer with its colors as an HTML fragment (&lt;html&gt;&lt;body&gt;&lt;pre&gt;…).</summary>
+    public Task<string> GetBufferHtmlAsync() => EvalStringAsync("exportHtml()");
+
+    async Task<string> EvalStringAsync(string script)
     {
         if (!_ready || _web.CoreWebView2 == null) return "";
-        const string script = """
-            (() => {
-              const b = term.buffer.active, out = [];
-              for (let i = 0; i < b.length; i++) {
-                const line = b.getLine(i);
-                const text = line.translateToString(true);
-                if (line.isWrapped && out.length) out[out.length - 1] += text; else out.push(text);
-              }
-              while (out.length && out[out.length - 1] === '') out.pop();
-              return out.join('\r\n');
-            })()
-            """;
         var json = await _web.CoreWebView2.ExecuteScriptAsync(script);
         return JsonSerializer.Deserialize<string>(json) ?? "";
     }

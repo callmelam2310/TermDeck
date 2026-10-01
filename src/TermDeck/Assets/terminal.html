@@ -40,6 +40,7 @@ html, body { margin: 0; height: 100%; background: #0c0c0c; overflow: hidden; }
 <script>{{XTERM}}</script>
 <script>{{FIT}}</script>
 <script>{{SEARCH}}</script>
+<script>{{SERIALIZE}}</script>
 <script>
 const post = m => window.chrome.webview.postMessage(m);
 const term = new Terminal({
@@ -118,6 +119,25 @@ $('prev').onclick = () => { runFind(true, false); q.focus(); };
 $('next').onclick = () => { runFind(false, false); q.focus(); };
 $('close').onclick = closeFind;
 
+// ── Export ──
+const serializer = new SerializeAddon.SerializeAddon();
+term.loadAddon(serializer);
+// Plain text of the buffer (visibleOnly = just the rows on screen); wrapped rows are joined back into one line.
+function bufferText(visibleOnly) {
+  const b = term.buffer.active, out = [];
+  const start = visibleOnly ? b.viewportY : 0;
+  const end = visibleOnly ? Math.min(b.length, b.viewportY + term.rows) : b.length;
+  for (let i = start; i < end; i++) {
+    const line = b.getLine(i);
+    const text = line.translateToString(true);
+    if (line.isWrapped && out.length) out[out.length - 1] += text; else out.push(text);
+  }
+  while (out.length && out[out.length - 1] === '') out.pop();
+  return out.join('\r\n');
+}
+const exportAnsi = () => serializer.serialize({ excludeModes: true, excludeAltBuffer: true });
+const exportHtml = () => serializer.serializeAsHTML({ includeGlobalBackground: true });
+
 term.onResize(s => post({ t: 'resize', cols: s.cols, rows: s.rows }));
 term.onData(d => post({ t: 'input', d }));
 
@@ -145,7 +165,11 @@ window.chrome.webview.addEventListener('message', e => {
   switch (m.t) {
     case 'w': term.write(m.d); break;
     case 'reset': term.reset(); search.clearDecorations(); count.textContent = ''; break;
-    case 'find': openFind(); break;
+    case 'find':
+      if (m.q === undefined) { openFind(); break; }
+      // Runs after every pending write has been parsed, so a replayed log is searchable.
+      term.write('', () => { findBar.classList.add('open'); q.value = m.q; runFind(false, false); });
+      break;
     case 'focus': term.focus(); break;
     case 'font': term.options.fontFamily = m.family; term.options.fontSize = m.size; doFit(); break;
   }

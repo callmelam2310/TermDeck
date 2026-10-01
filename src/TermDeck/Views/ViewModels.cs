@@ -123,13 +123,13 @@ public sealed class DocTab : Observable
     bool _isRunning;
     string _title;
 
-    public DocTab(string title, ToolTab? view)
+    public DocTab(string title, IDocView? view)
     {
         _title = title;
         View = view;
     }
 
-    public ToolTab? View { get; }
+    public IDocView? View { get; }
     public bool IsHome => View == null;
     public bool IsWsl => View?.Tool.Kind == ToolKind.Wsl;
 

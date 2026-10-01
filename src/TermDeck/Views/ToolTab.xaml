@@ -83,7 +83,7 @@
             <ListBox x:Name="RunsList" BorderThickness="0" SelectionChanged="RunsList_SelectionChanged"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" MouseDoubleClick="RunsList_MouseDoubleClick">
                 <ListBox.ContextMenu>
-                    <ContextMenu>
+                    <ContextMenu Opened="RunsMenu_Opened">
                         <MenuItem Header="Run again" Click="Rerun_Click">
                             <MenuItem.Icon><TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE768;" Foreground="#13A10E" /></MenuItem.Icon>
                         </MenuItem>
@@ -92,10 +92,13 @@
                             <MenuItem.Icon><TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE8C8;" /></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="Copy output as text" Click="CopyOutput_Click" />
-                        <MenuItem Header="Save output as .txt..." Click="SaveOutput_Click">
+                        <MenuItem Header="Export output..." Click="SaveOutput_Click" ToolTip="Save as plain text, ANSI (colors) or HTML">
                             <MenuItem.Icon><TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE74E;" /></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="Show log file (.cast)" Click="OpenLog_Click" />
+                        <MenuItem x:Name="AutorunMenu" Header="Autorun">
+                            <MenuItem.Icon><TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE945;" Foreground="#C8930C" /></MenuItem.Icon>
+                        </MenuItem>
                         <Separator />
                         <MenuItem Header="Delete from history" Click="DeleteRun_Click">
                             <MenuItem.Icon><TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE74D;" Foreground="#C50F1F" /></MenuItem.Icon>

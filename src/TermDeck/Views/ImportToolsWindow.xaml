@@ -1,0 +1,129 @@
+<Window x:Class="TermDeck.Views.ImportToolsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Scan for tools" Width="1000" Height="780" MinWidth="700" MinHeight="420"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="{DynamicResource ChromeBg}">
+    <DockPanel Margin="12">
+        <!-- Scan mode: where to look -->
+        <GroupBox x:Name="ScanPanel" DockPanel.Dock="Top" Padding="10,8" Background="{DynamicResource PanelBg}">
+            <GroupBox.Header>
+                <TextBlock Text="Look for executables in" FontSize="14" FontWeight="SemiBold" />
+            </GroupBox.Header>
+            <StackPanel>
+                <DockPanel>
+                    <RadioButton x:Name="WslRadio" Content="WSL" GroupName="src" IsChecked="True" VerticalAlignment="Center" Width="70" Checked="Source_Changed" />
+                    <TextBlock Text="Distro" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox x:Name="DistroBox" Width="200" HorizontalAlignment="Left" />
+                </DockPanel>
+                <StackPanel x:Name="WslFolders" Margin="70,8,0,0">
+                    <WrapPanel x:Name="FolderChecks" />
+                    <DockPanel Margin="0,6,0,0">
+                        <TextBlock Text="Other folders" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBox x:Name="OtherFolders" FontFamily="{StaticResource MonoFont}" Padding="3"
+                                 ToolTip="Extra Linux folders separated by ; (e.g. ~/tools/bin; /opt/burp)" />
+                    </DockPanel>
+                </StackPanel>
+                <DockPanel Margin="0,10,0,0">
+                    <RadioButton x:Name="WinRadio" Content="Windows" GroupName="src" VerticalAlignment="Center" Width="70" Checked="Source_Changed" />
+                    <CheckBox x:Name="Recursive" DockPanel.Dock="Right" Content="Include subfolders" IsChecked="True" VerticalAlignment="Center" Margin="10,0,0,0" />
+                    <Button DockPanel.Dock="Right" Content="Browse..." Padding="10,3" Margin="6,0,0,0" Click="Browse_Click" />
+                    <TextBox x:Name="WinFolder" FontFamily="{StaticResource MonoFont}" Padding="3" ToolTip="Folder with .exe tools (e.g. the tools folder next to TermDeck.exe)" />
+                </DockPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <Button x:Name="ScanButton" Padding="14,4" Click="Scan_Click" IsDefault="True">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE721;" Foreground="#0F6CBD" VerticalAlignment="Center" />
+                            <TextBlock Text=" Scan" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- File mode: where the tools come from -->
+        <TextBlock x:Name="FileInfo" DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,4" Visibility="Collapsed" />
+
+        <!-- Bottom -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button x:Name="ImportButton" Padding="14,4" Margin="0,0,6,0" Click="Import_Click" IsEnabled="False">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE710;" Foreground="#13A10E" VerticalAlignment="Center" />
+                        <TextBlock x:Name="ImportLabel" Text=" Add tools" FontWeight="SemiBold" />
+                    </StackPanel>
+                </Button>
+                <Button Content="Cancel" Width="90" IsCancel="True" />
+            </StackPanel>
+            <StackPanel x:Name="CollectionPanel" Orientation="Horizontal">
+                <TextBlock Text="Add to collection" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox x:Name="CollectionBox" IsEditable="True" Width="240"
+                          ToolTip="Pick a collection, or type a new name to create one" />
+            </StackPanel>
+            <StackPanel x:Name="ConflictPanel" Orientation="Horizontal" Visibility="Collapsed">
+                <TextBlock Text="Checked tools that already exist" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox x:Name="ConflictBox" Width="220" SelectedIndex="0">
+                    <ComboBoxItem Content="Skip them" />
+                    <ComboBoxItem Content="Replace them with the imported version" />
+                    <ComboBoxItem Content="Import them as copies" />
+                </ComboBox>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Filter -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,10,0,6">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Content="All" Padding="10,2" Margin="6,0,0,0" Click="All_Click" />
+                <Button Content="None" Padding="10,2" Margin="4,0,0,0" Click="None_Click" />
+                <Button Content="New only" Padding="10,2" Margin="4,0,0,0" Click="NewOnly_Click" />
+            </StackPanel>
+            <TextBlock x:Name="StatusText" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}" Margin="10,0,0,0" />
+            <Grid Width="260" HorizontalAlignment="Left">
+                <TextBox x:Name="FilterBox" Padding="22,2,2,2" TextChanged="FilterBox_TextChanged" ToolTip="Filter by name or path" />
+                <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE71C;" Foreground="{DynamicResource TextMuted}" Margin="6,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
+            </Grid>
+        </DockPanel>
+
+        <ListView x:Name="Rows" BorderBrush="{DynamicResource ChromeBorder}" Background="{DynamicResource PanelBg}"
+                  VirtualizingPanel.IsVirtualizing="True" KeyDown="Rows_KeyDown">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Width="34">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Click="RowCheck_Click" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Name" Width="170" DisplayMemberBinding="{Binding Name}" />
+                    <GridViewColumn Header="Kind" Width="70" DisplayMemberBinding="{Binding Kind}" />
+                    <GridViewColumn x:Name="GroupColumn" Header="Folder" Width="150" DisplayMemberBinding="{Binding Group}" />
+                    <GridViewColumn Header="Path" Width="330">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Path}" FontFamily="{StaticResource MonoFont}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Status" Width="150">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Status}" ToolTip="{Binding StatusDetail}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsNew}" Value="True">
+                                                    <Setter Property="Foreground" Value="#13A10E" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </DockPanel>
+</Window>

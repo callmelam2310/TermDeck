@@ -14,6 +14,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using TermDeck.Core;
+using TermDeck.Terminal;
 
 namespace TermDeck.Views;
 
@@ -21,7 +22,7 @@ namespace TermDeck.Views;
 /// A tool tab: terminal in the middle, argument box at the bottom, run history on the right.
 /// Each Run = one process = one history record; several runs can execute in parallel.
 /// </summary>
-public partial class ToolTab : UserControl, IDisposable
+public partial class ToolTab : UserControl, IDocView
 {
     readonly HistoryStore _store;
     readonly AppConfig _config;
@@ -36,17 +37,30 @@ public partial class ToolTab : UserControl, IDisposable
     RunSession? _attached;
     int _historyIndex = -1;
     bool _suppressSelection;
+    string? _pendingFind;
 
     /// <summary>Effective run-as account for the next Run; starts from the tool default, can be overridden per run.</summary>
     string _runAs = "";
     /// <summary>Run-as account each launched run used, so the info bar can show it (session-only).</summary>
     readonly Dictionary<long, string> _runAsById = new();
+    /// <summary>Autorun rule that launched a run ("rule ← source tool"), shown in the info bar (session-only).</summary>
+    readonly Dictionary<long, string> _originById = new();
 
     public ToolDef Tool { get; private set; }
     public string Cwd { get; private set; }
 
-    public event Action<ToolTab>? CwdChanged;
-    public event Action<ToolTab>? RunningChanged;
+    public event Action<IDocView>? CwdChanged;
+    public event Action<IDocView>? RunningChanged;
+    /// <summary>A run of this tab finished (its record has the exit code) — autorun rules start from here.</summary>
+    public event Action<ToolTab, RunRecord>? RunFinished;
+    /// <summary>History menu: run a rule on a past run (rule = null: create a new rule from it).</summary>
+    public event Action<ToolTab, RunRecord, AutoRule?>? AutorunRequested;
+
+    public TerminalHost Terminal => Term;
+
+    public string ExportName => CurrentItem is { } item
+        ? $"{Tool.Name}-{item.Record.StartedAt:yyyyMMdd-HHmmss}"
+        : Tool.Name;
 
     public ToolTab(ToolDef tool, HistoryStore store, AppConfig config)
     {
@@ -185,6 +199,8 @@ public partial class ToolTab : UserControl, IDisposable
             if (_viewId != id) return;
             Term.Write(text.Length > 0 ? text : "\x1b[90m(no output, or the log file was deleted)\x1b[0m\r\n");
         }
+        if (_pendingFind is { Length: > 0 } find) Term.Find(find);
+        _pendingFind = null;
         UpdateInfo();
         UpdateButtons();
     }
@@ -213,9 +229,11 @@ public partial class ToolTab : UserControl, IDisposable
         }
         var r = item.Record;
         var asUser = _runAsById.TryGetValue(r.Id, out var u) ? $"[{u}] " : "";
-        RunInfo.Text = "$ " + asUser + r.CommandLine;
+        var origin = _originById.TryGetValue(r.Id, out var o) ? $"[⚡ {o}] " : "";
+        RunInfo.Text = origin + "$ " + asUser + r.CommandLine;
         RunInfo.ToolTip = $"{r.CommandLine}\nDirectory: {r.Cwd}"
-            + (asUser.Length > 0 ? $"\nRun as: {u}" : "");
+            + (asUser.Length > 0 ? $"\nRun as: {u}" : "")
+            + (origin.Length > 0 ? $"\nStarted by autorun: {o}" : "");
         if (item.IsRunning)
             RunStatus.Text = $"running · {RunSession.FormatDuration(DateTime.Now - r.StartedAt)}";
         else
@@ -226,15 +244,21 @@ public partial class ToolTab : UserControl, IDisposable
 
     // ───────────────────────── Run ─────────────────────────
 
-    public void Run()
+    public void Run() => Launch(ArgsBox.Text.Trim(), null);
+
+    /// <summary>
+    /// Starts one run with the given arguments. <paramref name="origin"/> is set when autorun starts it: the run then
+    /// does not take the keyboard, so typing elsewhere is not sent to it.
+    /// </summary>
+    public RunSession? Launch(string args, string? origin)
     {
         if (string.IsNullOrWhiteSpace(Tool.Path))
         {
             MessageBox.Show("This tool has no binary path. Set it in the tool settings.", "TermDeck");
-            return;
+            return null;
         }
 
-        var args = ArgsBox.Text.Trim();
+        args = args.Trim();
         var spec = CommandBuilder.Build(Tool, args, Cwd, _runAs);
 
         // Windows run-as needs a password (WSL run-as is baked into the wsl -u command line and needs none).
@@ -242,7 +266,7 @@ public partial class ToolTab : UserControl, IDisposable
         if (spec.WinRunAsUser != null)
         {
             cred = CredentialWindow.Acquire(Window.GetWindow(this), spec.WinRunAsUser);
-            if (cred == null) return; // user cancelled the password prompt
+            if (cred == null) return null; // user cancelled the password prompt
         }
 
         var record = new RunRecord
@@ -258,10 +282,11 @@ public partial class ToolTab : UserControl, IDisposable
         catch (Exception ex)
         {
             MessageBox.Show("Could not write history: " + ex.Message, "TermDeck", MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
+            return null;
         }
 
         if (_runAs.Length > 0) _runAsById[record.Id] = _runAs;
+        if (origin != null) _originById[record.Id] = origin;
 
         var session = new RunSession(record);
         _live[record.Id] = session;
@@ -295,12 +320,15 @@ public partial class ToolTab : UserControl, IDisposable
         UpdateButtons();
 
         // Keyboard goes to the running process (arrow keys, menus, prompts, Ctrl+C) until it exits.
-        if (session.IsRunning) Term.FocusTerminal();
+        if (session.IsRunning && origin == null) Term.FocusTerminal();
+        return session;
     }
 
     void OnExited(RunSession s)
     {
         try { _store.Finish(s.Record); } catch { }
+        var record = s.Record;
+        Task.Run(() => { try { _store.IndexOutput(record); } catch { } });
         _live.Remove(s.Record.Id);
         var item = _runs.FirstOrDefault(r => r.Record.Id == s.Record.Id);
         if (item != null)
@@ -321,6 +349,7 @@ public partial class ToolTab : UserControl, IDisposable
 
         // The process that owned the keyboard is gone: hand focus back to the argument box for the next command.
         if (wasAttached && IsVisible && Term.IsKeyboardFocusWithin) FocusInput();
+        RunFinished?.Invoke(this, s.Record);
     }
 
     public void KillAll()
@@ -328,8 +357,18 @@ public partial class ToolTab : UserControl, IDisposable
         foreach (var s in _live.Values) s.Kill();
     }
 
+    /// <summary>Stops a running run of this tab by id (used by the AI agent). Returns false if it is not running here.</summary>
+    public bool StopRun(long id)
+    {
+        if (_live.TryGetValue(id, out var s) && s.IsRunning) { s.Stop(); return true; }
+        return false;
+    }
+
     public void Dispose()
     {
+        // Runs killed with the tab finish later: they must not fire autorun rules.
+        RunFinished = null;
+        AutorunRequested = null;
         _flushTimer.Stop();
         _tickTimer.Stop();
         DetachView();
@@ -337,6 +376,25 @@ public partial class ToolTab : UserControl, IDisposable
     }
 
     public void OpenFind() => Term.OpenFind();
+
+    /// <summary>Shows a run from history (e.g. picked in the Search window). Returns false if it is not in this tab's list.</summary>
+    public bool SelectRun(long runId, string? find = null)
+    {
+        SearchBox.Text = "";
+        var item = _runs.FirstOrDefault(r => r.Record.Id == runId);
+        if (item == null) return false;
+        if (RunsList.SelectedItem == item)
+        {
+            if (!string.IsNullOrEmpty(find)) Term.Find(find);
+        }
+        else
+        {
+            _pendingFind = find; // applied once Show() has written the log
+            RunsList.SelectedItem = item;
+        }
+        RunsList.ScrollIntoView(item);
+        return true;
+    }
 
     public void FocusInput()
     {
@@ -472,24 +530,12 @@ public partial class ToolTab : UserControl, IDisposable
         if (Selected is { } item) Clipboard.SetText(item.Record.CommandLine);
     }
 
-    async void CopyOutput_Click(object sender, RoutedEventArgs e)
-    {
-        var text = await Term.GetBufferTextAsync();
-        if (!string.IsNullOrEmpty(text)) Clipboard.SetText(text);
-    }
+    async void CopyOutput_Click(object sender, RoutedEventArgs e) => await TerminalExport.CopyAsync(Term);
 
     async void SaveOutput_Click(object sender, RoutedEventArgs e)
     {
-        if (Selected is not { } item) return;
-        var text = await Term.GetBufferTextAsync();
-        var dlg = new Microsoft.Win32.SaveFileDialog
-        {
-            InitialDirectory = Cwd,
-            FileName = $"{Tool.Name}-{item.Record.StartedAt:yyyyMMdd-HHmmss}.txt",
-            Filter = "Text (*.txt)|*.txt|All files (*.*)|*.*",
-        };
-        if (dlg.ShowDialog(Window.GetWindow(this)) == true)
-            File.WriteAllText(dlg.FileName, text + Environment.NewLine, new UTF8Encoding(false));
+        if (Selected is null) return;
+        await TerminalExport.SaveAsync(Window.GetWindow(this), Term, ExportName, Cwd);
     }
 
     void OpenLog_Click(object sender, RoutedEventArgs e)
@@ -497,6 +543,27 @@ public partial class ToolTab : UserControl, IDisposable
         if (Selected is not { } item) return;
         var path = _store.LogPath(item.Record);
         if (File.Exists(path)) Process.Start("explorer.exe", $"/select,\"{path}\"");
+    }
+
+    /// <summary>Fills the "Autorun" submenu with the rules whose source is this tool.</summary>
+    void RunsMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        AutorunMenu.Items.Clear();
+        var item = Selected;
+        AutorunMenu.IsEnabled = item is { IsRunning: false };
+        if (item == null) return;
+        foreach (var rule in _config.AutoRules.Where(r => r.FromToolId == Tool.Id))
+        {
+            var target = _config.Tools.FirstOrDefault(t => t.Id == rule.ToToolId)?.Name ?? "(missing tool)";
+            var mi = new MenuItem { Header = $"{rule.Name}  →  {target}", ToolTip = "Run this rule on the selected run (even if it is disabled)" };
+            if (!rule.Enabled) mi.Foreground = (Brush)FindResource("TextMuted");
+            mi.Click += (_, _) => AutorunRequested?.Invoke(this, item.Record, rule);
+            AutorunMenu.Items.Add(mi);
+        }
+        if (AutorunMenu.Items.Count > 0) AutorunMenu.Items.Add(new Separator());
+        var create = new MenuItem { Header = "New rule from this run..." };
+        create.Click += (_, _) => AutorunRequested?.Invoke(this, item.Record, null);
+        AutorunMenu.Items.Add(create);
     }
 
     void DeleteRun_Click(object sender, RoutedEventArgs e)

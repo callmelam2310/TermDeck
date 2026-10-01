@@ -59,7 +59,10 @@
             </RadioButton>
         </StackPanel>
 
-        <GroupBox Header="Basic settings" Padding="10" Background="{DynamicResource PanelBg}">
+        <GroupBox Padding="10" Background="{DynamicResource PanelBg}">
+            <GroupBox.Header>
+                <TextBlock Text="Basic settings" FontSize="14" FontWeight="SemiBold" />
+            </GroupBox.Header>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="130" />

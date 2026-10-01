@@ -72,6 +72,13 @@
                 <MenuItem Header="Open project..." InputGestureText="Ctrl+O" Click="OpenProject_Click" />
                 <MenuItem x:Name="RecentMenu" Header="Recent projects" />
                 <Separator />
+                <MenuItem x:Name="ShellMenu" Header="New shell tab">
+                    <MenuItem Header="Looking for shells…" IsEnabled="False" />
+                </MenuItem>
+                <Separator />
+                <MenuItem Header="Search history..." InputGestureText="Ctrl+Shift+F" Click="Search_Click" />
+                <MenuItem Header="Export report..." Click="Report_Click" />
+                <Separator />
                 <MenuItem Header="Open data folder" Click="OpenDataDir_Click" />
                 <MenuItem Header="Open project history folder" Click="OpenHistoryDir_Click" />
                 <Separator />
@@ -80,6 +87,14 @@
             <MenuItem Header="_Tools">
                 <MenuItem Header="New tool..." InputGestureText="Ctrl+N" Click="NewTool_Click" />
                 <MenuItem Header="New collection..." InputGestureText="Ctrl+Shift+N" Click="NewCollection_Click" />
+                <Separator />
+                <MenuItem Header="Scan for tools..." Click="ScanTools_Click" />
+                <MenuItem Header="Import tools..." Click="ImportTools_Click" />
+                <MenuItem Header="Export tools..." Click="ExportTools_Click" />
+                <Separator />
+                <MenuItem Header="Autorun rules..." Click="Autorun_Click" />
+                <MenuItem x:Name="AutorunEnabledMenu" Header="Autorun enabled" IsCheckable="True" Click="AutorunEnabled_Click" />
+                <MenuItem Header="AI agent..." Click="Agent_Click" />
                 <Separator />
                 <MenuItem Header="Edit..." InputGestureText="F2" Click="Edit_Click" />
                 <MenuItem Header="Duplicate tool" Click="DuplicateTool_Click" />
@@ -123,6 +138,18 @@
                             <TextBlock Style="{StaticResource RibbonLabel}" Text="Collection" />
                         </StackPanel>
                     </Button>
+                    <Button Style="{StaticResource RibbonButton}" Click="ScanTools_Click" ToolTip="Find executables in WSL (~/go/bin, pipx, cargo…) or a Windows folder and add them as tools">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource RibbonIcon}" Text="&#xE8B5;" Foreground="#8764B8" />
+                            <TextBlock Style="{StaticResource RibbonLabel}" Text="Scan tools" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource RibbonButton}" Click="Shell_Click" ToolTip="Open an interactive shell (WSL, PowerShell, cmd) in the project folder (Ctrl+T)">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource RibbonIcon}" Text="&#xE756;" Foreground="#E0701E" />
+                            <TextBlock Style="{StaticResource RibbonLabel}" Text="Shell &#x25BE;" />
+                        </StackPanel>
+                    </Button>
                     <Button Style="{StaticResource RibbonButton}" Click="OpenProject_Click" ToolTip="Open a project folder (Ctrl+O)">
                         <StackPanel>
                             <TextBlock Style="{StaticResource RibbonIcon}" Text="&#xE838;" Foreground="#2B6CB0" />
@@ -133,6 +160,31 @@
                         <StackPanel>
                             <TextBlock Style="{StaticResource RibbonIcon}" Text="&#xE70F;" Foreground="#1E73D8" />
                             <TextBlock Style="{StaticResource RibbonLabel}" Text="Edit" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource RibbonButton}" Click="Autorun_Click" ToolTip="Autorun: when a tool finishes, filter its output and run the next tool with it">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource RibbonIcon}" Text="&#xE945;" Foreground="#C8930C" />
+                            <TextBlock Style="{StaticResource RibbonLabel}" Text="Autorun" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource RibbonButton}" Click="Agent_Click" ToolTip="AI agent: chat with Claude to drive TermDeck (run tools, read history, build autorun chains)">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource RibbonIcon}" Text="&#xE99A;" Foreground="#8764B8" />
+                            <TextBlock Style="{StaticResource RibbonLabel}" Text="AI agent" />
+                        </StackPanel>
+                    </Button>
+                    <Rectangle Width="1" Fill="{DynamicResource ChromeBorder}" Margin="6,8" />
+                    <Button Style="{StaticResource RibbonButton}" Click="Search_Click" ToolTip="Search the output and commands of every run in this project (Ctrl+Shift+F)">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource RibbonIcon}" Text="&#xE721;" Foreground="#0F6CBD" />
+                            <TextBlock Style="{StaticResource RibbonLabel}" Text="Search" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource RibbonButton}" Click="Report_Click" ToolTip="Export the project's runs as an HTML or Markdown report">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource RibbonIcon}" Text="&#xE9F9;" Foreground="#13A10E" />
+                            <TextBlock Style="{StaticResource RibbonLabel}" Text="Report" />
                         </StackPanel>
                     </Button>
                     <Rectangle Width="1" Fill="{DynamicResource ChromeBorder}" Margin="6,8" />
@@ -180,6 +232,10 @@
             </StatusBarItem>
             <StatusBarItem DockPanel.Dock="Right">
                 <TextBlock x:Name="StatusMode" Foreground="{DynamicResource TextMuted}" />
+            </StatusBarItem>
+            <StatusBarItem DockPanel.Dock="Right" Margin="0,0,16,0">
+                <TextBlock x:Name="StatusAutorun" Cursor="Hand" MouseLeftButtonUp="StatusAutorun_Click"
+                           ToolTip="Autorun — click to turn on/off, edit rules or cancel queued runs" />
             </StatusBarItem>
             <StatusBarItem DockPanel.Dock="Right" Margin="0,0,16,0">
                 <TextBlock x:Name="StatusRunning" Foreground="#1E73D8" />
@@ -280,7 +336,8 @@
                         </ListBox.ItemsPanel>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <StackPanel Orientation="Horizontal" MouseDown="TabHeader_MouseDown">
+                                <StackPanel Orientation="Horizontal" MouseDown="TabHeader_MouseDown" MouseRightButtonUp="TabHeader_MouseRightButtonUp"
+                                            Background="Transparent">
                                     <TextBlock FontFamily="{StaticResource IconFont}" VerticalAlignment="Center" Margin="0,1,6,0">
                                         <TextBlock.Style>
                                             <Style TargetType="TextBlock">
@@ -415,7 +472,10 @@
                                 • In the argument box, ↑/↓ browse previously used arguments. Drop files from the Files panel to insert their paths (converted to /mnt/... for WSL tools).<LineBreak />
                                 • Terminal: selecting text copies it, right-click pastes, Ctrl+C with no selection sends an interrupt to the tool.<LineBreak />
                                 • Files: enable “Follow terminal folder” to keep the panel and the tab's working directory in sync. Drop files from Windows Explorer to copy them in.<LineBreak />
-                                • Shortcuts: Ctrl+N new tool · Ctrl+Shift+N new collection · Ctrl+O open project · Ctrl+B toggle sidebar · Ctrl+W close tab · Ctrl+Tab switch tab · Ctrl+F find in terminal.
+                                • Right-click a tab to export what its terminal shows (text, ANSI colors or HTML) or close other tabs.<LineBreak />
+                                • Search finds text in the output of every run of the project; Report exports runs as HTML/Markdown (e.g. as evidence).<LineBreak />
+                                • Scan tools adds executables from WSL (~/go/bin, pipx, cargo…) or a Windows folder in one go. Tools → Import/Export shares collections as JSON.<LineBreak />
+                                • Shortcuts: Ctrl+N new tool · Ctrl+Shift+N new collection · Ctrl+O open project · Ctrl+T new shell · Ctrl+Shift+F search history · Ctrl+B toggle sidebar · Ctrl+W close tab · Ctrl+Tab switch tab · Ctrl+F find in terminal.
                             </TextBlock>
                         </StackPanel>
                     </ScrollViewer>

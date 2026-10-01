@@ -73,6 +73,15 @@ public sealed class AppConfig
     public int TerminalFontSize { get; set; } = 14;
     public double SidebarWidth { get; set; } = 270;
     public double HistoryWidth { get; set; } = 300;
+    /// <summary>Key of the last shell opened (<see cref="ShellDef.Key"/>); Ctrl+T opens it again.</summary>
+    public string LastShell { get; set; } = "";
+    /// <summary>Master switch: when off, no rule fires on its own (rules can still be run by hand from a run's menu).</summary>
+    public bool AutorunEnabled { get; set; } = true;
+    public List<AutoRule> AutoRules { get; set; } = new();
+    /// <summary>Model passed to the Claude CLI for the AI agent (empty = the CLI default).</summary>
+    public string AgentModel { get; set; } = "";
+    /// <summary>Remembered state of the agent window's "auto-approve actions" toggle.</summary>
+    public bool AgentAutoApprove { get; set; }
 }
 
 public sealed class RunRecord

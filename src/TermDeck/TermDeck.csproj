@@ -8,8 +8,10 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>TermDeck</AssemblyName>
     <RootNamespace>TermDeck</RootNamespace>
-    <Version>0.3.0</Version>
+    <Version>1.0.0</Version>
     <Product>TermDeck</Product>
+    <!-- Custom entry point so the exe can run the headless MCP server instead of the WPF app. -->
+    <StartupObject>TermDeck.Program</StartupObject>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationIcon>Assets\TermDeck.ico</ApplicationIcon>
     <!-- Application.ThemeMode (Fluent light/dark) is flagged experimental -->
@@ -32,6 +34,12 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
   </ItemGroup>
 
+  <!-- App.xaml as a Page (not ApplicationDefinition) so our Program.Main is the entry point. -->
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
   <ItemGroup>
     <Resource Include="Assets\TermDeck.ico" />
     <Resource Include="Assets\logo.png" />
@@ -42,6 +50,7 @@
     <EmbeddedResource Include="Assets\xterm.css" LogicalName="xterm.css" />
     <EmbeddedResource Include="Assets\addon-fit.js" LogicalName="addon-fit.js" />
     <EmbeddedResource Include="Assets\addon-search.js" LogicalName="addon-search.js" />
+    <EmbeddedResource Include="Assets\addon-serialize.js" LogicalName="addon-serialize.js" />
     <EmbeddedResource Include="Assets\terminal.html" LogicalName="terminal.html" />
   </ItemGroup>
 

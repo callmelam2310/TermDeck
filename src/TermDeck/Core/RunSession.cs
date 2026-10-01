@@ -18,6 +18,7 @@ public sealed class RunSession
     PtyProcess? _pty;
     Action<RunSession, string>? _sink;
     Thread? _reader;
+    int _cols, _rows;
 
     public RunRecord Record { get; }
     public bool IsRunning { get; private set; }
@@ -28,6 +29,7 @@ public sealed class RunSession
     public void Start(LaunchSpec spec, string castPath, int cols, int rows, WinCredential? cred = null)
     {
         _cast = new CastWriter(castPath, cols, rows, spec.Display);
+        (_cols, _rows) = (cols, rows);
         _clock.Start();
         IsRunning = true;
         try
@@ -124,7 +126,14 @@ public sealed class RunSession
 
     public void Resize(int cols, int rows)
     {
-        if (IsRunning) _pty?.Resize(cols, rows);
+        if (!IsRunning) return;
+        _pty?.Resize(cols, rows);
+        lock (_lock)
+        {
+            if (cols == _cols && rows == _rows) return;
+            (_cols, _rows) = (cols, rows);
+            _cast?.Resize(_clock.Elapsed.TotalSeconds, cols, rows);
+        }
     }
 
     /// <summary>Sends Ctrl+C first; if still running after 1.5s, kills the whole process tree.</summary>

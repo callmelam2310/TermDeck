@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -34,6 +35,8 @@ public partial class MainWindow : Window
     object? _contextTarget;
     Point _dragStart;
     ToolDef? _dragTool;
+    List<ShellDef>? _shells;
+    SearchWindow? _searchWindow;
 
     public MainWindow(AppConfig config)
     {
@@ -66,6 +69,7 @@ public partial class MainWindow : Window
         };
 
         StatusMode.Text = AppPaths.IsPortable ? "Portable" : "Installed";
+        UpdateAutorunStatus();
         StatusMode.ToolTip = "Data: " + AppPaths.DataDir;
 
         AddShortcut(Key.N, ModifierKeys.Control, () => NewTool());
@@ -73,12 +77,15 @@ public partial class MainWindow : Window
         AddShortcut(Key.O, ModifierKeys.Control, () => OpenProject_Click(this, new RoutedEventArgs()));
         AddShortcut(Key.B, ModifierKeys.Control, () => ToggleSidebar_Click(this, new RoutedEventArgs()));
         AddShortcut(Key.W, ModifierKeys.Control, () => CloseCurrentTab_Click(this, new RoutedEventArgs()));
-        AddShortcut(Key.F, ModifierKeys.Control, () => ActiveToolTab?.OpenFind());
+        AddShortcut(Key.F, ModifierKeys.Control, () => ActiveView?.OpenFind());
+        AddShortcut(Key.F, ModifierKeys.Control | ModifierKeys.Shift, () => OpenSearch());
+        AddShortcut(Key.T, ModifierKeys.Control, () => OpenDefaultShell());
         AddShortcut(Key.Tab, ModifierKeys.Control, () => CycleTab(1));
         AddShortcut(Key.Tab, ModifierKeys.Control | ModifierKeys.Shift, () => CycleTab(-1));
 
         // Let the window paint first; on first run OpenInitialProject shows a folder picker.
         Loaded += (_, _) => Dispatcher.BeginInvoke(OpenInitialProject, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        LoadShells();
     }
 
     void AddShortcut(Key key, ModifierKeys mods, Action action)
@@ -88,7 +95,9 @@ public partial class MainWindow : Window
         InputBindings.Add(new KeyBinding(cmd, key, mods));
     }
 
-    ToolTab? ActiveToolTab => (TabStrip.SelectedItem as DocTab)?.View;
+    IDocView? ActiveView => (TabStrip.SelectedItem as DocTab)?.View;
+    ToolTab? ActiveToolTab => ActiveView as ToolTab;
+    IEnumerable<IDocView> Views => _tabs.Where(t => !t.IsHome).Select(t => t.View!);
     ToolDef? SelectedTool => ToolsTree.SelectedItem as ToolDef;
     CollectionNode? SelectedNode => ToolsTree.SelectedItem as CollectionNode;
 
@@ -96,11 +105,10 @@ public partial class MainWindow : Window
 
     void OpenInitialProject()
     {
+        // Reopen the last project, or fall back to the default folder — never pop a folder picker on startup.
+        // Use File → Open project… (Ctrl+O) to switch.
         if (!string.IsNullOrEmpty(_config.LastProject) && Directory.Exists(_config.LastProject) && OpenProject(_config.LastProject))
             return;
-
-        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Choose a project folder (run history is stored inside it)" };
-        if (dlg.ShowDialog(this) == true && OpenProject(dlg.FolderName)) return;
 
         Directory.CreateDirectory(AppPaths.DefaultProjectDir);
         OpenProject(AppPaths.DefaultProjectDir);
@@ -119,8 +127,10 @@ public partial class MainWindow : Window
             return false;
         }
 
-        // Tabs are bound to the project folder they were opened in, so close them all.
+        // Tabs and the search window are bound to the project folder they were opened in, so close them all.
+        _searchWindow?.Close();
         foreach (var tab in _tabs.Where(t => !t.IsHome).ToList()) RemoveTab(tab);
+        ResetAutorun();
         _store = store;
         _projectDir = dir;
 
@@ -179,24 +189,101 @@ public partial class MainWindow : Window
 
     // ───────────────────────── Tabs ─────────────────────────
 
-    void OpenToolTab(ToolDef tool)
+    /// <summary>Opens the tool's tab. <paramref name="forceNew"/> always opens an extra tab, so one tool can run in
+    /// several terminals at once (titled "name (2)", "name (3)"…); otherwise the existing tab is reused.</summary>
+    ToolTab? OpenToolTab(ToolDef tool, bool forceNew = false)
     {
-        if (_store == null) return;
-        var existing = _tabs.FirstOrDefault(t => t.View?.Tool.Id == tool.Id);
-        if (existing != null)
+        if (_store == null) return null;
+        if (!forceNew)
         {
-            TabStrip.SelectedItem = existing;
-            return;
+            var existing = TabOf(tool.Id);
+            if (existing != null)
+            {
+                TabStrip.SelectedItem = existing;
+                return (ToolTab)existing.View!;
+            }
         }
+        var tab = new ToolTab(tool, _store, _config);
+        tab.RunFinished += OnToolRunFinished;
+        tab.AutorunRequested += OnAutorunRequested;
+        var n = _tabs.Count(t => t.View is ToolTab v && v.Tool.Id == tool.Id);
+        AddTab(n == 0 ? tool.Name : $"{tool.Name} ({n + 1})", tab);
+        return tab;
+    }
 
-        var view = new ToolTab(tool, _store, _config) { Visibility = Visibility.Collapsed };
-        var doc = new DocTab(tool.Name, view);
+    DocTab? TabOf(string toolId) => _tabs.FirstOrDefault(t => t.View is ToolTab v && v.Tool.Id == toolId);
+
+    DocTab AddTab(string title, IDocView view)
+    {
+        var doc = new DocTab(title, view);
+        view.Element.Visibility = Visibility.Collapsed;
         view.CwdChanged += OnTabCwdChanged;
         view.RunningChanged += _ => { doc.IsRunning = view.HasRunning; UpdateRunningStatus(); };
-        ContentHost.Children.Add(view);
+        ContentHost.Children.Add(view.Element);
         _tabs.Add(doc);
         TabStrip.SelectedItem = doc;
         TabStrip.ScrollIntoView(doc);
+        return doc;
+    }
+
+    // ───────────────────────── Shell tabs ─────────────────────────
+
+    async void LoadShells()
+    {
+        _shells = await Task.Run(ShellCatalog.List);
+        RebuildShellMenu();
+    }
+
+    IEnumerable<MenuItem> ShellItems()
+    {
+        if (_shells == null)
+        {
+            yield return new MenuItem { Header = "Looking for shells…", IsEnabled = false };
+            yield break;
+        }
+        foreach (var sh in _shells)
+        {
+            var item = Item(sh.Title, () => OpenShell(sh), glyph: "\uE756", color: sh.Kind == ToolKind.Wsl ? "#E0701E" : "#1E73D8",
+                bold: sh.Key == _config.LastShell);
+            if (sh.Key == _config.LastShell) item.InputGestureText = "Ctrl+T";
+            yield return item;
+        }
+    }
+
+    void RebuildShellMenu()
+    {
+        ShellMenu.Items.Clear();
+        foreach (var item in ShellItems()) ShellMenu.Items.Add(item);
+    }
+
+    /// <summary>Ribbon button: drops down the list of shells.</summary>
+    void Shell_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = (UIElement)sender, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        foreach (var item in ShellItems()) menu.Items.Add(item);
+        menu.IsOpen = true;
+    }
+
+    void OpenDefaultShell()
+    {
+        if (_shells is not { Count: > 0 }) return;
+        OpenShell(_shells.FirstOrDefault(s => s.Key == _config.LastShell) ?? _shells[0]);
+    }
+
+    void OpenShell(ShellDef shell)
+    {
+        if (_store == null) return;
+        if (_config.LastShell != shell.Key)
+        {
+            _config.LastShell = shell.Key;
+            SaveConfig();
+            RebuildShellMenu();
+        }
+        // Start where the Files panel is when it follows the terminal, otherwise in the project folder.
+        var dir = Files.Follow && ActiveView is { } v ? v.Cwd : _projectDir;
+        var baseTitle = shell.Kind == ToolKind.Wsl ? shell.Distro : shell.Key;
+        var n = _tabs.Count(t => t.View is ShellTab s && s.Shell.Key == shell.Key);
+        AddTab(n == 0 ? baseTitle : $"{baseTitle} ({n + 1})", new ShellTab(shell, _store, _config, dir));
     }
 
     void TabStrip_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -209,7 +296,7 @@ public partial class MainWindow : Window
 
         HomeView.Visibility = doc.IsHome ? Visibility.Visible : Visibility.Collapsed;
         foreach (var t in _tabs.Where(t => !t.IsHome))
-            t.View!.Visibility = t == doc ? Visibility.Visible : Visibility.Collapsed;
+            t.View!.Element.Visibility = t == doc ? Visibility.Visible : Visibility.Collapsed;
 
         if (doc.View is { } view)
         {
@@ -243,7 +330,7 @@ public partial class MainWindow : Window
         var view = doc.View!;
         view.KillAll();
         view.Dispose();
-        ContentHost.Children.Remove(view);
+        ContentHost.Children.Remove(view.Element);
         _tabs.Remove(doc);
     }
 
@@ -253,7 +340,50 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    void Find_Click(object sender, RoutedEventArgs e) => ActiveToolTab?.OpenFind();
+    void Find_Click(object sender, RoutedEventArgs e) => ActiveView?.OpenFind();
+
+    /// <summary>Right-click on a tab header: export what its terminal shows, close tabs.</summary>
+    void TabHeader_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var header = (FrameworkElement)sender;
+        e.Handled = true;
+        if (header.DataContext is not DocTab doc || doc.IsHome || doc.View is not { } view) return;
+        var menu = new ContextMenu { PlacementTarget = header, Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint };
+        FillTabMenu(menu, doc, view);
+        menu.IsOpen = true;
+    }
+
+    void FillTabMenu(ContextMenu menu, DocTab doc, IDocView view)
+    {
+        if (view.Terminal is { } term)
+        {
+            menu.Items.Add(Item("Export text...", async () => await TerminalExport.SaveAsync(this, term, view.ExportName, _projectDir),
+                bold: true, glyph: "\uE74E", color: "#1E73D8"));
+            menu.Items.Add(Item("Export visible screen...", async () => await TerminalExport.SaveAsync(this, term, view.ExportName, _projectDir, visibleOnly: true),
+                glyph: "\uE7F4"));
+            menu.Items.Add(Item("Copy all text", async () => await TerminalExport.CopyAsync(term), glyph: "\uE8C8"));
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Item("Find in terminal", () => { TabStrip.SelectedItem = doc; view.OpenFind(); }, glyph: "\uE721"));
+        }
+        if (view is ToolTab tt)
+            menu.Items.Add(Item("Edit tool...", () => { if (_tools.FirstOrDefault(t => t.Id == tt.Tool.Id) is { } tool) EditTool(tool); },
+                glyph: "\uE70F", color: "#1E73D8"));
+        if (view is ShellTab st)
+            menu.Items.Add(Item("New tab with this shell", () => OpenShell(st.Shell), glyph: "\uE756"));
+        if (view is AgentTab at)
+            menu.Items.Add(Item("New chat", () => at.NewChatPublic(), glyph: "\uE710", color: "#13A10E"));
+        if (menu.Items.Count > 0 && menu.Items[menu.Items.Count - 1] is not Separator) menu.Items.Add(new Separator());
+        menu.Items.Add(Item("Close", () => CloseTab(doc), glyph: "\uE8BB"));
+        var others = _tabs.Where(t => !t.IsHome && t != doc).ToList();
+        menu.Items.Add(Item("Close other tabs", () => CloseTabs(others), enabled: others.Count > 0));
+        var right = _tabs.Skip(_tabs.IndexOf(doc) + 1).ToList();
+        menu.Items.Add(Item("Close tabs to the right", () => CloseTabs(right), enabled: right.Count > 0));
+    }
+
+    void CloseTabs(IEnumerable<DocTab> tabs)
+    {
+        foreach (var t in tabs.ToList()) CloseTab(t);
+    }
 
     void CloseCurrentTab_Click(object sender, RoutedEventArgs e)
     {
@@ -283,9 +413,18 @@ public partial class MainWindow : Window
         TabStrip.ScrollIntoView(TabStrip.SelectedItem);
     }
 
+    /// <summary>Shows a short message in the status bar, then goes back to the running count.</summary>
+    void ShowStatus(string message)
+    {
+        StatusRunning.Text = message;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        timer.Tick += (_, _) => { timer.Stop(); UpdateRunningStatus(); };
+        timer.Start();
+    }
+
     void UpdateRunningStatus()
     {
-        var n = _tabs.Where(t => !t.IsHome).Sum(t => t.View!.RunningCount);
+        var n = Views.Sum(v => v.RunningCount);
         StatusRunning.Text = n == 0 ? "" : $"● {n} running";
     }
 
@@ -293,19 +432,19 @@ public partial class MainWindow : Window
 
     void OnFilesDirectoryChanged(string dir)
     {
-        if (Files.Follow) ActiveToolTab?.SetCwd(dir, false);
+        if (Files.Follow) ActiveView?.SetCwd(dir, false);
     }
 
-    void OnTabCwdChanged(ToolTab tab)
+    void OnTabCwdChanged(IDocView tab)
     {
-        if (Files.Follow && tab == ActiveToolTab) Files.Navigate(tab.Cwd, false);
+        if (Files.Follow && tab == ActiveView) Files.Navigate(tab.Cwd, false);
     }
 
     void OnFilesInsertRequested(IReadOnlyList<string> paths)
     {
-        if (ActiveToolTab is not { } tab)
+        if (ActiveView is not { } tab)
         {
-            MessageBox.Show(this, "Open a tool tab first to insert paths into its command.", "TermDeck");
+            MessageBox.Show(this, "Open a tool or shell tab first to insert paths into it.", "TermDeck");
             return;
         }
         tab.InsertText(string.Join(" ", paths.Select(p => PathMapper.ForCommand(p, tab.Tool))));
@@ -450,6 +589,7 @@ public partial class MainWindow : Window
         {
             case ToolDef tool:
                 menu.Items.Add(Item("Open", () => OpenToolTab(tool), bold: true, glyph: "", color: "#13A10E"));
+                menu.Items.Add(Item("Open in new tab", () => OpenToolTab(tool, forceNew: true), glyph: "", color: "#13A10E"));
                 menu.Items.Add(Item("Edit...", () => EditTool(tool), glyph: "", color: "#1E73D8"));
                 menu.Items.Add(Item("Duplicate", () => DuplicateTool(tool), glyph: ""));
                 var move = new MenuItem { Header = "Move to", Icon = Glyph("", "#C8930C") };
@@ -467,6 +607,8 @@ public partial class MainWindow : Window
                 menu.Items.Add(Item($"Open all ({node.Tools.Count})", () => OpenAll(node), bold: true, glyph: "", color: "#13A10E", enabled: node.Tools.Count > 0));
                 menu.Items.Add(Item("New tool in this collection...", () => NewTool(node.Id), glyph: "", color: "#13A10E"));
                 menu.Items.Add(Item("Rename...", () => RenameCollection(node), glyph: ""));
+                menu.Items.Add(Item("Scan for tools into this collection...", () => ScanTools(node.Name), glyph: "\uE721"));
+                menu.Items.Add(Item("Export collection...", () => ExportCollection(node), glyph: "\uEDE1", enabled: node.Tools.Count > 0));
                 menu.Items.Add(new Separator());
                 menu.Items.Add(Item("Delete collection", () => DeleteCollection(node), glyph: "", color: "#C50F1F"));
                 break;
@@ -476,6 +618,10 @@ public partial class MainWindow : Window
             default:
                 menu.Items.Add(Item("New tool...", () => NewTool(), glyph: "", color: "#13A10E"));
                 menu.Items.Add(Item("New collection...", () => NewCollection(), glyph: "", color: "#C8930C"));
+                menu.Items.Add(new Separator());
+                menu.Items.Add(Item("Scan for tools...", () => ScanTools(""), glyph: "\uE721"));
+                menu.Items.Add(Item("Import tools...", () => ImportTools_Click(this, new RoutedEventArgs()), glyph: "\uE8B5"));
+                menu.Items.Add(Item("Export tools...", () => ExportTools_Click(this, new RoutedEventArgs()), glyph: "\uEDE1"));
                 break;
         }
     }
@@ -583,10 +729,10 @@ public partial class MainWindow : Window
         {
             var i = _tools.IndexOf(tool);
             if (i >= 0) _tools[i] = updated;
-            var doc = _tabs.FirstOrDefault(t => t.View?.Tool.Id == updated.Id);
+            var doc = TabOf(updated.Id);
             if (doc != null)
             {
-                doc.View!.UpdateTool(updated);
+                ((ToolTab)doc.View!).UpdateTool(updated);
                 doc.Title = updated.Name;
                 if (doc == TabStrip.SelectedItem) Files.SetTool(updated);
             }
@@ -626,7 +772,7 @@ public partial class MainWindow : Window
 
     void DeleteTool(ToolDef tool)
     {
-        var doc = _tabs.FirstOrDefault(t => t.View?.Tool.Id == tool.Id);
+        var doc = TabOf(tool.Id);
         if (doc?.View?.HasRunning == true)
         {
             MessageBox.Show(this, "This tool is running. Stop it before deleting.", "TermDeck");
@@ -667,12 +813,147 @@ public partial class MainWindow : Window
         foreach (var t in node.Tools.ToList()) OpenToolTab(t);
     }
 
+    // ───────────────────────── Search, report ─────────────────────────
+
+    void Search_Click(object sender, RoutedEventArgs e) => OpenSearch();
+
+    void OpenSearch(string? query = null)
+    {
+        if (_store == null) return;
+        if (_searchWindow == null)
+        {
+            // Not owned: after "Open in tab" the main window must be able to come in front of it.
+            _searchWindow = new SearchWindow(_store, OpenRunInTab);
+            _searchWindow.Closed += (_, _) => _searchWindow = null;
+            _searchWindow.Show();
+        }
+        else
+        {
+            if (_searchWindow.WindowState == WindowState.Minimized) _searchWindow.WindowState = WindowState.Normal;
+            _searchWindow.Activate();
+        }
+        _searchWindow.FocusQuery(query);
+    }
+
+    /// <summary>Opens the tool tab of a run from the Search window and shows that run. False if the tool no longer exists.</summary>
+    bool OpenRunInTab(RunRecord run, string? find)
+    {
+        var tool = _tools.FirstOrDefault(t => t.Id == run.ToolId);
+        if (tool == null) return false;
+        OpenToolTab(tool);
+        Activate();
+        return TabOf(tool.Id)?.View is ToolTab tab && tab.SelectRun(run.Id, find);
+    }
+
+    void Report_Click(object sender, RoutedEventArgs e) => ExportReport(null);
+
+    /// <param name="runs">Runs to include (e.g. search results); null = choose in the dialog from the whole project.</param>
+    public void ExportReport(IReadOnlyList<RunRecord>? runs, Window? owner = null)
+    {
+        if (_store == null) return;
+        new ReportWindow(_store, runs) { Owner = owner ?? this }.ShowDialog();
+    }
+
+    // ───────────────────────── Import / export tools ─────────────────────────
+
+    void ScanTools_Click(object sender, RoutedEventArgs e) => ScanTools(SelectedNode is { IsUngrouped: false } n ? n.Name : "");
+
+    void ScanTools(string collection)
+    {
+        var dlg = new ImportToolsWindow(_tools, _collections, collection) { Owner = this };
+        if (dlg.ShowDialog() == true) AfterImport(dlg.ImportedCount);
+    }
+
+    void ImportTools_Click(object sender, RoutedEventArgs e)
+    {
+        var open = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Import tools",
+            Filter = "TermDeck tools (*.json)|*.json|All files (*.*)|*.*",
+        };
+        if (open.ShowDialog(this) != true) return;
+        ToolPack pack;
+        try { pack = ToolTransfer.Load(open.FileName); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, "Could not import this file:\n" + ex.Message, "Import tools", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (pack.Collections.Sum(c => c.Tools.Count) == 0)
+        {
+            MessageBox.Show(this, "The file contains no tools.", "Import tools");
+            return;
+        }
+        var dlg = new ImportToolsWindow(_tools, _collections, pack, Path.GetFileName(open.FileName)) { Owner = this };
+        if (dlg.ShowDialog() == true) AfterImport(dlg.ImportedCount);
+    }
+
+    void AfterImport(int count)
+    {
+        SaveConfig();
+        RebuildTree();
+        ShowSide(ToolsSideTab);
+        // Tabs of replaced tools show the new definition.
+        foreach (var doc in _tabs.Where(t => t.View is ToolTab).ToList())
+        {
+            var tab = (ToolTab)doc.View!;
+            if (_tools.FirstOrDefault(t => t.Id == tab.Tool.Id) is { } tool && !ReferenceEquals(tool, tab.Tool))
+            {
+                tab.UpdateTool(tool);
+                doc.Title = tool.Name;
+            }
+        }
+        ShowStatus($"Imported {count} tool(s)");
+    }
+
+    void ExportTools_Click(object sender, RoutedEventArgs e)
+    {
+        if (_tools.Count == 0)
+        {
+            MessageBox.Show(this, "There are no tools to export.", "Export tools");
+            return;
+        }
+        // Choose which collections to export.
+        var ids = ExportToolsWindow.Pick(this, BuildNodes("", trackExpansion: false).Where(n => n.Tools.Count > 0).ToList());
+        if (ids != null) SaveToolPack(ids, "all");
+    }
+
+    void ExportCollection(CollectionNode node) => SaveToolPack(new HashSet<string> { node.Id }, node.Name);
+
+    void SaveToolPack(ICollection<string> collectionIds, string name)
+    {
+        var pack = ToolTransfer.Create(_tools, _collections, collectionIds);
+        var count = pack.Collections.Sum(c => c.Tools.Count);
+        if (count == 0)
+        {
+            MessageBox.Show(this, "No tools selected.", "Export tools");
+            return;
+        }
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Export tools",
+            FileName = ToolTransfer.DefaultFileName(name),
+            Filter = "TermDeck tools (*.json)|*.json",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        try
+        {
+            ToolTransfer.Save(pack, dlg.FileName);
+            ShowStatus($"Exported {count} tool(s)");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "Could not save the file:\n" + ex.Message, "Export tools", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     // ───────────────────────── Misc ─────────────────────────
 
     void Settings_Click(object sender, RoutedEventArgs e)
     {
         if (new SettingsWindow(_config) { Owner = this }.ShowDialog() != true) return;
-        foreach (var t in _tabs.Where(t => !t.IsHome)) t.View!.ApplyFont();
+        foreach (var v in Views) v.ApplyFont();
+        RefreshAgentTabs();
         SaveConfig();
     }
 
@@ -693,7 +974,7 @@ public partial class MainWindow : Window
 
     bool ConfirmStopRunning(string message)
     {
-        var running = _tabs.Where(t => !t.IsHome).Sum(t => t.View!.RunningCount);
+        var running = Views.Sum(v => v.RunningCount);
         return running == 0 ||
                MessageBox.Show(this, $"{running} command(s) are running.\n{message}", "TermDeck",
                    MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
@@ -706,7 +987,9 @@ public partial class MainWindow : Window
             e.Cancel = true;
             return;
         }
-        foreach (var t in _tabs.Where(t => !t.IsHome)) t.View!.KillAll();
+        foreach (var v in Views) v.KillAll();
+        _searchWindow?.Close();
+        DisposeAgent();
         SaveConfig();
     }
 
