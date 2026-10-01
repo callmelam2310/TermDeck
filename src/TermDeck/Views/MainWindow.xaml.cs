@@ -223,6 +223,7 @@ public partial class MainWindow : Window
         _tabs.Add(doc);
         TabStrip.SelectedItem = doc;
         TabStrip.ScrollIntoView(doc);
+        Dispatcher.BeginInvoke(UpdateTabScrollButtons, System.Windows.Threading.DispatcherPriority.Background);
         return doc;
     }
 
@@ -332,6 +333,7 @@ public partial class MainWindow : Window
         view.Dispose();
         ContentHost.Children.Remove(view.Element);
         _tabs.Remove(doc);
+        Dispatcher.BeginInvoke(UpdateTabScrollButtons, System.Windows.Threading.DispatcherPriority.Background);
     }
 
     void CloseTab_Click(object sender, RoutedEventArgs e)
@@ -402,8 +404,48 @@ public partial class MainWindow : Window
 
     void TabStrip_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        CycleTab(e.Delta < 0 ? 1 : -1);
+        // Wheel scrolls the strip when tabs overflow; otherwise it cycles the selection.
+        var sv = TabScrollViewer;
+        if (sv != null && sv.ScrollableWidth > 0)
+            sv.ScrollToHorizontalOffset(Math.Clamp(sv.HorizontalOffset - e.Delta, 0, sv.ScrollableWidth));
+        else
+            CycleTab(e.Delta < 0 ? 1 : -1);
         e.Handled = true;
+    }
+
+    void TabScrollLeft_Click(object sender, RoutedEventArgs e) => ScrollTabs(-140);
+    void TabScrollRight_Click(object sender, RoutedEventArgs e) => ScrollTabs(140);
+
+    void ScrollTabs(double delta)
+    {
+        var sv = TabScrollViewer;
+        if (sv != null) sv.ScrollToHorizontalOffset(Math.Clamp(sv.HorizontalOffset + delta, 0, sv.ScrollableWidth));
+    }
+
+    void TabStrip_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateTabScrollButtons();
+
+    ScrollViewer? TabScrollViewer => FindDescendant<ScrollViewer>(TabStrip);
+
+    /// <summary>Shows the ◂ ▸ tab-scroll buttons only when the tabs overflow the strip.</summary>
+    void UpdateTabScrollButtons()
+    {
+        var sv = TabScrollViewer;
+        var show = sv != null && sv.ScrollableWidth > 0.5;
+        var vis = show ? Visibility.Visible : Visibility.Collapsed;
+        TabScrollLeft.Visibility = vis;
+        TabScrollRight.Visibility = vis;
+    }
+
+    static T? FindDescendant<T>(DependencyObject? root) where T : DependencyObject
+    {
+        if (root == null) return null;
+        for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var c = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            if (c is T t) return t;
+            if (FindDescendant<T>(c) is { } d) return d;
+        }
+        return null;
     }
 
     void CycleTab(int step)

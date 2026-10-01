@@ -326,9 +326,19 @@
             <!-- Tab area -->
             <DockPanel Grid.Column="3">
                 <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBg}" BorderBrush="{DynamicResource Accent}" BorderThickness="0,0,0,2" Padding="4,4,4,0">
+                    <DockPanel>
+                        <RepeatButton x:Name="TabScrollLeft" DockPanel.Dock="Left" Click="TabScrollLeft_Click" Visibility="Collapsed"
+                                      Width="22" Margin="0,0,2,2" Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                      ToolTip="Scroll tabs left"
+                                      Content="&#xE76B;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource TextSecondary}" />
+                        <RepeatButton x:Name="TabScrollRight" DockPanel.Dock="Right" Click="TabScrollRight_Click" Visibility="Collapsed"
+                                      Width="22" Margin="2,0,0,2" Padding="0" Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                      ToolTip="Scroll tabs right"
+                                      Content="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource TextSecondary}" />
                     <ListBox x:Name="TabStrip" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource DocTabItem}"
                              SelectionChanged="TabStrip_SelectionChanged" ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                             ScrollViewer.VerticalScrollBarVisibility="Disabled" PreviewMouseWheel="TabStrip_PreviewMouseWheel">
+                             ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="False"
+                             PreviewMouseWheel="TabStrip_PreviewMouseWheel" SizeChanged="TabStrip_SizeChanged">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Horizontal" />
@@ -385,6 +395,7 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
+                    </DockPanel>
                 </Border>
 
                 <Grid x:Name="ContentHost" Background="{DynamicResource PanelBg}">
