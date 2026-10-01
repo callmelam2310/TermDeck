@@ -21,6 +21,8 @@ public partial class MainWindow
     readonly List<AutoJob> _autoQueue = new();
     /// <summary>Runs started by autorun that have not finished yet: rule and chain depth.</summary>
     readonly Dictionary<long, (string RuleId, int Depth)> _autoRuns = new();
+    /// <summary>Autorun runs the user force-stopped, so finishing them does not trigger the next tool in the chain.</summary>
+    readonly HashSet<long> _autoCancelled = new();
 
     void Autorun_Click(object sender, RoutedEventArgs e) => OpenAutorun();
 
@@ -45,24 +47,57 @@ public partial class MainWindow
     void StatusAutorun_Click(object sender, MouseButtonEventArgs e)
     {
         var menu = new ContextMenu { PlacementTarget = StatusAutorun, Placement = System.Windows.Controls.Primitives.PlacementMode.Top };
-        menu.Items.Add(Item("Autorun enabled", () => SetAutorunEnabled(!_config.AutorunEnabled), isChecked: _config.AutorunEnabled));
-        menu.Items.Add(Item("Rules...", () => OpenAutorun(), glyph: "", color: "#C8930C"));
+        menu.Items.Add(Item($"⛔ Stop autorun now ({_autoRuns.Count} running, {_autoQueue.Count} queued)", StopAutorun,
+            enabled: AutorunBusy, color: "#C50F1F"));
         menu.Items.Add(new Separator());
-        menu.Items.Add(Item($"Cancel {_autoQueue.Count} queued run(s)", () => { _autoQueue.Clear(); UpdateAutorunStatus(); },
-            enabled: _autoQueue.Count > 0, glyph: ""));
+        menu.Items.Add(Item("Autorun enabled", () => SetAutorunEnabled(!_config.AutorunEnabled), isChecked: _config.AutorunEnabled));
+        menu.Items.Add(Item("Rules...", () => OpenAutorun(), color: "#C8930C"));
         menu.IsOpen = true;
         e.Handled = true;
+    }
+
+    bool AutorunBusy => _autoRuns.Count > 0 || _autoQueue.Count > 0;
+
+    /// <summary>Stops the whole in-flight chain: drop the pending queue and Ctrl+C/kill every run autorun started.</summary>
+    void StopAutorun()
+    {
+        var queued = _autoQueue.Count;
+        _autoQueue.Clear();
+        var running = _autoRuns.Keys.ToList();
+        foreach (var id in running)
+        {
+            _autoCancelled.Add(id);
+            foreach (var t in Views.OfType<ToolTab>()) if (t.StopRun(id)) break;
+        }
+        UpdateAutorunStatus();
+        ShowStatus($"⚡ Autorun stopped — cancelled {queued} queued, stopping {running.Count} running");
     }
 
     void UpdateAutorunStatus()
     {
         AutorunEnabledMenu.IsChecked = _config.AutorunEnabled;
         var rules = _config.AutoRules.Count(r => r.Enabled);
-        var text = _config.AutorunEnabled ? $"⚡ Autorun on · {rules} rule(s)" : "⚡ Autorun off";
-        if (_autoRuns.Count > 0) text += $" · {_autoRuns.Count} running";
-        if (_autoQueue.Count > 0) text += $" · {_autoQueue.Count} queued";
+        string text, color;
+        if (AutorunBusy)
+        {
+            text = $"⚡ Autorun running · {_autoRuns.Count} running";
+            if (_autoQueue.Count > 0) text += $" · {_autoQueue.Count} queued";
+            text += " — click to stop";
+            color = "#C8930C";
+        }
+        else
+        {
+            text = _config.AutorunEnabled ? $"⚡ Autorun on · {rules} rule(s)" : "⚡ Autorun off";
+            color = _config.AutorunEnabled ? "TextSecondary" : "TextMuted";
+        }
         StatusAutorun.Text = text;
-        StatusAutorun.SetResourceReference(TextBlock.ForegroundProperty, _config.AutorunEnabled ? "TextSecondary" : "TextMuted");
+        StatusAutorun.ToolTip = AutorunBusy
+            ? "A tool chain is running. Click to stop it (cancels the queue and stops running tools)."
+            : "Autorun — click to turn on/off, edit rules, or stop a running chain.";
+        if (color.StartsWith('#'))
+            StatusAutorun.Foreground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString(color)!;
+        else
+            StatusAutorun.SetResourceReference(TextBlock.ForegroundProperty, color);
     }
 
     /// <summary>Project switch: queued runs belong to the old project.</summary>
@@ -70,14 +105,18 @@ public partial class MainWindow
     {
         _autoQueue.Clear();
         _autoRuns.Clear();
+        _autoCancelled.Clear();
         UpdateAutorunStatus();
     }
 
     void OnToolRunFinished(ToolTab tab, RunRecord run)
     {
-        var depth = _autoRuns.Remove(run.Id, out var info) ? info.Depth : 0;
+        var wasAuto = _autoRuns.Remove(run.Id, out var info);
+        var cancelled = _autoCancelled.Remove(run.Id);
         PumpAutorun();
+        if (cancelled) { UpdateAutorunStatus(); return; } // user stopped this run; don't chain onward
         if (!_config.AutorunEnabled || _store == null) return;
+        var depth = wasAuto ? info.Depth : 0;
         foreach (var rule in _config.AutoRules.Where(r => r.Enabled && r.FromToolId == tab.Tool.Id && Autorun.Matches(r, run)).ToList())
             _ = FireAsync(rule, run, depth + 1, manual: false);
     }

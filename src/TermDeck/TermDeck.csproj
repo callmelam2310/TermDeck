@@ -8,7 +8,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>TermDeck</AssemblyName>
     <RootNamespace>TermDeck</RootNamespace>
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <Product>TermDeck</Product>
     <!-- Custom entry point so the exe can run the headless MCP server instead of the WPF app. -->
     <StartupObject>TermDeck.Program</StartupObject>
