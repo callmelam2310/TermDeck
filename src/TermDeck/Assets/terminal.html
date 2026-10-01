@@ -50,9 +50,6 @@ const term = new Terminal({
   allowProposedApi: true,
   cursorBlink: true,
   convertEol: false,
-  // ConPTY soft-wraps long lines; this makes xterm mark those rows as wrapped so selecting,
-  // copying and exporting join them back into one logical line (so grep doesn't miss split text).
-  windowsPty: { backend: 'conpty', buildNumber: {{WINBUILD}} },
   theme: {
     background: '#0c0c0c', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: '#264f78',
     black: '#0c0c0c', red: '#c50f1f', green: '#13a10e', yellow: '#c19c00',
@@ -126,14 +123,19 @@ $('close').onclick = closeFind;
 const serializer = new SerializeAddon.SerializeAddon();
 term.loadAddon(serializer);
 // Plain text of the buffer (visibleOnly = just the rows on screen); wrapped rows are joined back into one line.
+// xterm sets line.isWrapped for its own soft-wraps, but ConPTY emits wrapped lines WITHOUT that flag, so we also
+// treat a row that fills the full width (no trailing space, trimmed length === cols) as continuing into the next
+// row. This only affects copy/export text — the on-screen display is untouched.
 function bufferText(visibleOnly) {
-  const b = term.buffer.active, out = [];
+  const b = term.buffer.active, cols = term.cols, out = [];
   const start = visibleOnly ? b.viewportY : 0;
   const end = visibleOnly ? Math.min(b.length, b.viewportY + term.rows) : b.length;
+  let prevFull = false;
   for (let i = start; i < end; i++) {
     const line = b.getLine(i);
     const text = line.translateToString(true);
-    if (line.isWrapped && out.length) out[out.length - 1] += text; else out.push(text);
+    if ((line.isWrapped || prevFull) && out.length) out[out.length - 1] += text; else out.push(text);
+    prevFull = text.length >= cols; // a row whose content reaches the last column continues onto the next
   }
   while (out.length && out[out.length - 1] === '') out.pop();
   return out.join('\r\n');

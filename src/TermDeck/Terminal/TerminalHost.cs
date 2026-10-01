@@ -87,10 +87,7 @@ public sealed class TerminalHost : Border, IDisposable
             .Replace("{{SERIALIZE}}", ReadResource("addon-serialize.js"));
         return _pageTemplate
             .Replace("{{FONT}}", JsonSerializer.Serialize(FontFamily))
-            .Replace("{{SIZE}}", FontSize.ToString())
-            // Windows build number lets xterm apply the right ConPTY line-wrapping heuristic, so soft-wrapped
-            // lines are marked wrapped and copy/export joins them back into one logical line.
-            .Replace("{{WINBUILD}}", Environment.OSVersion.Version.Build.ToString());
+            .Replace("{{SIZE}}", FontSize.ToString());
     }
 
     static string ReadResource(string name)
