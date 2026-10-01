@@ -33,6 +33,7 @@ public partial class ToolEditorWindow : Window
         NameBox.Text = _tool.Name;
         ArgsBox.Text = _tool.DefaultArgs;
         RunAsBox.Text = _tool.RunAsUser;
+        ColsBox.Text = _tool.TerminalCols > 0 ? _tool.TerminalCols.ToString() : "0";
         ShellBox.Text = string.IsNullOrWhiteSpace(_tool.WslShell) ? "bash" : _tool.WslShell;
         DistroBox.Text = _tool.Distro;
         if (_tool.Kind == ToolKind.Wsl) { WslCmdBox.Text = _tool.Path; KindWsl.IsChecked = true; }
@@ -122,6 +123,7 @@ public partial class ToolEditorWindow : Window
         t.WslShell = string.IsNullOrWhiteSpace(ShellBox.Text) ? "bash" : ShellBox.Text.Trim();
         t.RunAsUser = RunAsBox.Text.Trim();
         t.DefaultArgs = ArgsBox.Text.Trim();
+        t.TerminalCols = int.TryParse(ColsBox.Text.Trim(), out var c) && c > 0 ? Math.Clamp(c, 20, 1000) : 0;
         t.CollectionId = (CollectionBox.SelectedItem as ToolCollection)?.Id ?? "";
         return t;
     }

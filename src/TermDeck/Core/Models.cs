@@ -30,6 +30,13 @@ public sealed class ToolDef
 
     public string DefaultArgs { get; set; } = "";
 
+    /// <summary>
+    /// Fixed terminal width (columns) the tool runs at, so table/CLI tools that trim their output to the detected
+    /// terminal width (gowitness, docker ps, kubectl…) print in full regardless of the window. 0 = fit to the window.
+    /// The display still wraps to the window and copy/export keep the full lines.
+    /// </summary>
+    public int TerminalCols { get; set; }
+
     /// <summary>Collection this tool belongs to. Empty = ungrouped.</summary>
     public string CollectionId { get; set; } = "";
 

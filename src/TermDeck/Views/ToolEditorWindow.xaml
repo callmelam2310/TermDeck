@@ -77,6 +77,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TextBlock Text="Display name" VerticalAlignment="Center" />
@@ -118,6 +119,15 @@
                 <StackPanel Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2">
                     <ComboBox x:Name="RunAsBox" IsEditable="True" FontFamily="{StaticResource MonoFont}" />
                     <TextBlock x:Name="RunAsHint" Style="{StaticResource Hint}" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="7" Text="Terminal width" VerticalAlignment="Top" Margin="0,15,0,0" />
+                <StackPanel Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0">
+                    <DockPanel>
+                        <TextBox x:Name="ColsBox" DockPanel.Dock="Left" Width="70" FontFamily="{StaticResource MonoFont}" TextChanged="Any_Changed" />
+                        <TextBlock Text="columns (0 = fit to window)" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource TextMuted}" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}" Text="Fixed width for tools that trim output to the terminal size (gowitness, docker ps, kubectl…). Set e.g. 200 so the full line is printed; it still wraps to the window and copies in full." />
                 </StackPanel>
 
             </Grid>

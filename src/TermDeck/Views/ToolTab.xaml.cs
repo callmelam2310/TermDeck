@@ -75,7 +75,8 @@ public partial class ToolTab : UserControl, IDocView
         Term.FontFamily = config.TerminalFont;
         Term.FontSize = config.TerminalFontSize;
         Term.Input += s => _attached?.WriteInput(s);
-        Term.Resized += (c, r) => _attached?.Resize(c, r);
+        // When the tool has a fixed width, keep the pty at that width on resize (only rows follow the window).
+        Term.Resized += (c, r) => _attached?.Resize(Tool.TerminalCols > 0 ? Tool.TerminalCols : c, r);
 
         RunsList.ItemsSource = _runs;
 
@@ -190,7 +191,7 @@ public partial class ToolTab : UserControl, IDocView
         {
             Term.Write(session.Attach(Sink));
             _attached = session;
-            session.Resize(Term.Cols, Term.Rows);
+            session.Resize(Tool.TerminalCols > 0 ? Tool.TerminalCols : Term.Cols, Term.Rows);
         }
         else
         {
@@ -314,7 +315,7 @@ public partial class ToolTab : UserControl, IDocView
         RunsList.ScrollIntoView(item);
         _suppressSelection = false;
 
-        session.Start(spec, _store.LogPath(record), Term.Cols, Term.Rows, cred);
+        session.Start(spec, _store.LogPath(record), Tool.TerminalCols > 0 ? Tool.TerminalCols : Term.Cols, Term.Rows, cred);
         RunningChanged?.Invoke(this);
         UpdateInfo();
         UpdateButtons();
