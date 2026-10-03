@@ -70,6 +70,7 @@ public partial class MainWindow : Window
 
         StatusMode.Text = AppPaths.IsPortable ? "Portable" : "Installed";
         UpdateAutorunStatus();
+        InitProxy();
         StatusMode.ToolTip = "Data: " + AppPaths.DataDir;
 
         AddShortcut(Key.N, ModifierKeys.Control, () => NewTool());

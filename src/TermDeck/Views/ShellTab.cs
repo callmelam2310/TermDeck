@@ -98,7 +98,7 @@ public sealed class ShellTab : UserControl, IDocView
 
     void Start()
     {
-        var spec = Shell.Build(_startDir);
+        var spec = Shell.Build(_startDir, Proxy.Current);
         var record = new RunRecord
         {
             ToolId = Shell.ToolId,
@@ -120,8 +120,19 @@ public sealed class ShellTab : UserControl, IDocView
         _session = session;
         session.Attach((_, data) => _queue.Enqueue(data));
         session.Start(spec, _store.LogPath(record), _term.Cols, _term.Rows);
-        _info.Text = "$ " + spec.Display;
-        _info.ToolTip = $"{spec.Display}\nDirectory: {spec.DisplayCwd}\nSession #{record.Id} is recorded in the project history.";
+        var proxy = spec.Proxy == null ? "" : $"[🌐 {spec.Proxy.Profile.Name}] ";
+        _info.Text = proxy + "$ " + spec.Display;
+        _info.Foreground = new SolidColorBrush(Color.FromRgb(0xD4, 0xD4, 0xD4));
+        _info.ToolTip = $"{spec.Display}\nDirectory: {spec.DisplayCwd}\nSession #{record.Id} is recorded in the project history."
+            + (spec.Proxy == null ? "" : $"\nProxy: {spec.Proxy.Profile.Name} (exported as HTTP_PROXY/HTTPS_PROXY/ALL_PROXY)");
+        session.ProxyLeak += (s, _) => Dispatcher.BeginInvoke(() =>
+        {
+            if (s != _session) return;
+            var leaks = s.ProxyLeaks;
+            _info.Text = $"[⚠ bypassing {s.Proxy!.Profile.Name}: {leaks[0]}{(leaks.Length > 1 ? $" +{leaks.Length - 1}" : "")}] $ " + spec.Display;
+            _info.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xA3, 0x3C));
+            _info.ToolTip = $"{spec.Display}\nProxy: {s.Proxy.Profile.Name}\nDirect connections (not through the proxy):\n  " + string.Join("\n  ", leaks);
+        });
         UpdateStatus();
         RunningChanged?.Invoke(this);
         if (IsVisible) _term.FocusTerminal();

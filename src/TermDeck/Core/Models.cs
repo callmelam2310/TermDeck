@@ -89,6 +89,10 @@ public sealed class AppConfig
     public string AgentModel { get; set; } = "";
     /// <summary>Remembered state of the agent window's "auto-approve actions" toggle.</summary>
     public bool AgentAutoApprove { get; set; }
+    /// <summary>Proxy profiles new runs can be sent through.</summary>
+    public List<ProxyProfile> Proxies { get; set; } = new();
+    /// <summary>Name of the active proxy profile; empty = runs go direct.</summary>
+    public string ActiveProxy { get; set; } = "";
 }
 
 public sealed class RunRecord

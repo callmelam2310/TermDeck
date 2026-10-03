@@ -14,17 +14,24 @@ public sealed record ShellDef(string Key, string Title, ToolKind Kind, string Di
     /// <summary>History rows of shell sessions use this tool id, so search and reports can group them.</summary>
     public string ToolId => "shell:" + Key;
 
-    public LaunchSpec Build(string cwd)
+    /// <param name="proxy">Proxy exported into the shell's environment; null = direct.</param>
+    public LaunchSpec Build(string cwd, ProxyProfile? proxy = null)
     {
         if (Kind == ToolKind.Wsl)
         {
             var linuxCwd = PathMapper.ToLinux(cwd);
             var cl = "wsl.exe" + (Distro.Length > 0 ? " -d " + CommandBuilder.QuoteWin(Distro) : "")
                      + " --cd " + CommandBuilder.QuoteWin(linuxCwd);
-            return new LaunchSpec(cl, null, cl, linuxCwd);
+            if (proxy == null) return new LaunchSpec(cl, null, cl, linuxCwd);
+            // Export the proxy, then replace sh with the user's login shell.
+            var pl = new ProxyLaunch(proxy, Proxy.NewToken(), true, Distro);
+            var script = Proxy.WslPrefix(proxy, pl.Token)
+                         + "s=$(getent passwd \"$(id -un)\" | cut -d: -f7); exec \"${s:-bash}\" -l";
+            return new LaunchSpec(cl + " -e sh -c " + CommandBuilder.QuoteWin(script), null, cl, linuxCwd, Proxy: pl);
         }
         var exe = CommandBuilder.QuoteWin(Exe) + (Key == "cmd" ? "" : " -NoLogo");
-        return new LaunchSpec(exe, cwd, exe, cwd);
+        if (proxy == null) return new LaunchSpec(exe, cwd, exe, cwd);
+        return new LaunchSpec(exe, cwd, exe, cwd, null, Proxy.WindowsEnv(proxy), new ProxyLaunch(proxy, Proxy.NewToken(), false, ""));
     }
 
     /// <summary>A stand-in tool so the Files panel maps and quotes paths for this shell.</summary>

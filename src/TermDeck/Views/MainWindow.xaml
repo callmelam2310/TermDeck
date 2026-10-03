@@ -234,6 +234,9 @@
                 <TextBlock x:Name="StatusMode" Foreground="{DynamicResource TextMuted}" />
             </StatusBarItem>
             <StatusBarItem DockPanel.Dock="Right" Margin="0,0,16,0">
+                <TextBlock x:Name="StatusProxy" Cursor="Hand" MouseLeftButtonUp="StatusProxy_Click" />
+            </StatusBarItem>
+            <StatusBarItem DockPanel.Dock="Right" Margin="0,0,16,0">
                 <TextBlock x:Name="StatusAutorun" Cursor="Hand" MouseLeftButtonUp="StatusAutorun_Click"
                            ToolTip="Autorun — click to turn on/off, edit rules or cancel queued runs" />
             </StatusBarItem>

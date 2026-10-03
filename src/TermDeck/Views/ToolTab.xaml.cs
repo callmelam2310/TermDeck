@@ -45,6 +45,9 @@ public partial class ToolTab : UserControl, IDocView
     readonly Dictionary<long, string> _runAsById = new();
     /// <summary>Autorun rule that launched a run ("rule ← source tool"), shown in the info bar (session-only).</summary>
     readonly Dictionary<long, string> _originById = new();
+    /// <summary>Runs started through a proxy: profile name, and the endpoints each reached directly (bypassing it).</summary>
+    readonly Dictionary<long, string> _proxyById = new();
+    readonly Dictionary<long, List<string>> _leaksById = new();
 
     public ToolDef Tool { get; private set; }
     public string Cwd { get; private set; }
@@ -231,10 +234,20 @@ public partial class ToolTab : UserControl, IDocView
         var r = item.Record;
         var asUser = _runAsById.TryGetValue(r.Id, out var u) ? $"[{u}] " : "";
         var origin = _originById.TryGetValue(r.Id, out var o) ? $"[⚡ {o}] " : "";
-        RunInfo.Text = origin + "$ " + asUser + r.CommandLine;
+        _proxyById.TryGetValue(r.Id, out var px);
+        var leaks = _leaksById.TryGetValue(r.Id, out var l) ? l : null;
+        var bypassed = leaks is { Count: > 0 };
+        var proxy = px == null ? ""
+            : bypassed ? $"[⚠ bypassing {px}: {leaks![0]}{(leaks.Count > 1 ? $" +{leaks.Count - 1}" : "")}] "
+            : $"[🌐 {px}] ";
+        RunInfo.Text = proxy + origin + "$ " + asUser + r.CommandLine;
+        RunInfo.Foreground = new SolidColorBrush(bypassed ? Color.FromRgb(0xE8, 0xA3, 0x3C) : Color.FromRgb(0xD4, 0xD4, 0xD4));
         RunInfo.ToolTip = $"{r.CommandLine}\nDirectory: {r.Cwd}"
             + (asUser.Length > 0 ? $"\nRun as: {u}" : "")
-            + (origin.Length > 0 ? $"\nStarted by autorun: {o}" : "");
+            + (origin.Length > 0 ? $"\nStarted by autorun: {o}" : "")
+            + (px == null ? ""
+                : bypassed ? $"\nProxy: {px}\nDirect connections (not through the proxy):\n  " + string.Join("\n  ", leaks!)
+                : $"\nProxy: {px}\nNo direct TCP connection seen (raw-socket traffic such as SYN scans or ping is not visible).");
         if (item.IsRunning)
             RunStatus.Text = $"running · {RunSession.FormatDuration(DateTime.Now - r.StartedAt)}";
         else
@@ -260,7 +273,7 @@ public partial class ToolTab : UserControl, IDocView
         }
 
         args = args.Trim();
-        var spec = CommandBuilder.Build(Tool, args, Cwd, _runAs);
+        var spec = CommandBuilder.Build(Tool, args, Cwd, _runAs, Proxy.Current);
 
         // Windows run-as needs a password (WSL run-as is baked into the wsl -u command line and needs none).
         WinCredential? cred = null;
@@ -288,10 +301,17 @@ public partial class ToolTab : UserControl, IDocView
 
         if (_runAs.Length > 0) _runAsById[record.Id] = _runAs;
         if (origin != null) _originById[record.Id] = origin;
+        if (spec.Proxy != null) _proxyById[record.Id] = spec.Proxy.Profile.Name;
 
         var session = new RunSession(record);
         _live[record.Id] = session;
         session.Exited += s => Dispatcher.BeginInvoke(() => OnExited(s));
+        session.ProxyLeak += (s, ep) => Dispatcher.BeginInvoke(() =>
+        {
+            if (!_leaksById.TryGetValue(s.Record.Id, out var list)) _leaksById[s.Record.Id] = list = new();
+            list.Add(ep);
+            if (_viewId == s.Record.Id) UpdateInfo();
+        });
 
         var item = new RunItem(record, true);
         _runs.Insert(0, item);

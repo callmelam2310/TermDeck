@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.Threading;
@@ -19,10 +20,20 @@ public sealed class RunSession
     Action<RunSession, string>? _sink;
     Thread? _reader;
     int _cols, _rows;
+    ProxyMonitor? _monitor;
+    readonly List<string> _leaks = new();
 
     public RunRecord Record { get; }
     public bool IsRunning { get; private set; }
     public event Action<RunSession>? Exited;
+
+    /// <summary>The proxy this run was started with; null = direct.</summary>
+    public ProxyLaunch? Proxy { get; private set; }
+    /// <summary>Raised (on a worker thread) for each endpoint the run reached without going through the proxy.</summary>
+    public event Action<RunSession, string>? ProxyLeak;
+
+    /// <summary>Endpoints reached directly so far ("1.2.3.4:443 (nuclei)").</summary>
+    public string[] ProxyLeaks { get { lock (_leaks) return _leaks.ToArray(); } }
 
     public RunSession(RunRecord record) => Record = record;
 
@@ -34,13 +45,25 @@ public sealed class RunSession
         IsRunning = true;
         try
         {
-            _pty = PtyProcess.Start(spec.CommandLine, spec.WorkingDir, cols, rows, cred);
+            _pty = PtyProcess.Start(spec.CommandLine, spec.WorkingDir, cols, rows, cred, spec.Env);
         }
         catch (Exception ex)
         {
             Emit($"\x1b[31mFailed to start: {ex.Message}\x1b[0m\r\n\x1b[90m{spec.CommandLine}\x1b[0m\r\n");
             Finish(-1);
             return;
+        }
+
+        Proxy = spec.Proxy;
+        if (spec.Proxy != null)
+        {
+            var pty = _pty;
+            _monitor = new ProxyMonitor(spec.Proxy, pty.ProcessIds, ep =>
+            {
+                lock (_leaks) _leaks.Add(ep);
+                ProxyLeak?.Invoke(this, ep);
+                Core.Proxy.RaiseLeak(Record, ep);
+            });
         }
 
         _reader = new Thread(ReadLoop) { IsBackground = true, Name = $"pty-read-{Record.Id}" };
@@ -77,6 +100,11 @@ public sealed class RunSession
     void Finish(int code)
     {
         var elapsed = _clock.Elapsed;
+        _monitor?.Dispose();
+        // Kept in the log, so the history shows which runs bypassed the proxy.
+        var leaks = ProxyLeaks;
+        if (leaks.Length > 0)
+            Emit($"\r\n\x1b[33m⚠ Not through proxy \"{Proxy!.Profile.Name}\" — direct connections to: {string.Join(", ", leaks)}\x1b[0m");
         var color = code == 0 ? "32" : "31";
         Emit($"\r\n\x1b[90m── finished · exit \x1b[{color}m{DescribeExit(code)}\x1b[90m · {FormatDuration(elapsed)} ──\x1b[0m\r\n");
         lock (_lock)

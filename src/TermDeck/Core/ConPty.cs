@@ -1,5 +1,9 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
+using System.Text;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -46,7 +50,10 @@ public sealed class PtyProcess : IDisposable
         _output = output;
     }
 
-    public static PtyProcess Start(string commandLine, string? workingDir, int cols, int rows, WinCredential? cred = null)
+    /// <param name="env">Variables added to (or overriding) the app's environment. Ignored for run-as, which gets the
+    /// target user's own environment.</param>
+    public static PtyProcess Start(string commandLine, string? workingDir, int cols, int rows, WinCredential? cred = null,
+        IReadOnlyDictionary<string, string>? env = null)
     {
         if (!Native.CreatePipe(out var inRead, out var inWrite, IntPtr.Zero, 0))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "CreatePipe (input)");
@@ -60,6 +67,7 @@ public sealed class PtyProcess : IDisposable
         var attrSize = IntPtr.Zero;
         Native.InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref attrSize);
         var attrList = Marshal.AllocHGlobal(attrSize);
+        var envBlock = cred == null && env is { Count: > 0 } ? Marshal.StringToHGlobalUni(EnvironmentBlock(env)) : IntPtr.Zero;
         try
         {
             if (!Native.InitializeProcThreadAttributeList(attrList, 1, 0, ref attrSize))
@@ -83,7 +91,7 @@ public sealed class PtyProcess : IDisposable
             if (cred == null)
             {
                 ok = Native.CreateProcessW(null, cmd, IntPtr.Zero, IntPtr.Zero, false,
-                    flags, IntPtr.Zero, cwd, ref si, out pi);
+                    flags, envBlock, cwd, ref si, out pi);
             }
             else
             {
@@ -124,7 +132,36 @@ public sealed class PtyProcess : IDisposable
         {
             Native.DeleteProcThreadAttributeList(attrList);
             Marshal.FreeHGlobal(attrList);
+            if (envBlock != IntPtr.Zero) Marshal.FreeHGlobal(envBlock);
         }
+    }
+
+    /// <summary>The app's environment with <paramref name="extra"/> applied, as a sorted "k=v\0…\0\0" Unicode block.</summary>
+    static string EnvironmentBlock(IReadOnlyDictionary<string, string> extra)
+    {
+        var vars = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DictionaryEntry e in Environment.GetEnvironmentVariables()) vars[(string)e.Key] = (string?)e.Value ?? "";
+        foreach (var (k, v) in extra) vars[k] = v;
+        var sb = new StringBuilder();
+        foreach (var (k, v) in vars) sb.Append(k).Append('=').Append(v).Append('\0');
+        return sb.Append('\0').ToString();
+    }
+
+    /// <summary>PIDs of every process in the run's job (the whole tree), or just the main process without a job.</summary>
+    public int[] ProcessIds()
+    {
+        if (_job == IntPtr.Zero) return [ProcessId];
+        const int max = 1024;
+        // JOBOBJECT_BASIC_PROCESS_ID_LIST: two DWORD counts, then ULONG_PTR ids.
+        var size = 8 + max * IntPtr.Size;
+        var buf = Marshal.AllocHGlobal(size);
+        try
+        {
+            if (!Native.QueryInformationJobObject(_job, Native.JobObjectBasicProcessIdList, buf, (uint)size, IntPtr.Zero)) return [ProcessId];
+            var n = Marshal.ReadInt32(buf, 4);
+            return Enumerable.Range(0, Math.Min(n, max)).Select(i => (int)Marshal.ReadIntPtr(buf, 8 + i * IntPtr.Size)).ToArray();
+        }
+        finally { Marshal.FreeHGlobal(buf); }
     }
 
     static IntPtr CreateKillOnCloseJob()
@@ -191,6 +228,7 @@ internal static class Native
     public const int STARTF_USESTDHANDLES = 0x00000100;
     public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
     public const int JobObjectExtendedLimitInformation = 9;
+    public const int JobObjectBasicProcessIdList = 3;
     public static readonly IntPtr PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = (IntPtr)0x00020016;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -310,4 +348,7 @@ internal static class Native
 
     [DllImport("kernel32.dll")]
     public static extern bool TerminateJobObject(IntPtr hJob, uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool QueryInformationJobObject(IntPtr hJob, int infoClass, IntPtr info, uint size, IntPtr returnLength);
 }
